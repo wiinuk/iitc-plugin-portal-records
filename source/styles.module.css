@@ -1,0 +1,10 @@
+.icon {
+    color: #FFFFBB;
+    font-size: 20px;
+    line-height: 21px;
+    text-align: center;
+    padding-top: 0.5em;
+    overflow: hidden;
+    text-shadow: 1px 1px #000, 1px -1px #000, -1px 1px #000, -1px -1px #000, 0 0 5px #000;
+    pointer-events: none;
+}
