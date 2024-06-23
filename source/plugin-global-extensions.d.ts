@@ -32,6 +32,14 @@ function addLayerGroup<Layer extends L.ILayer>(
     layerGroup: L.LayerGroup<Layer>,
     defaultDisplay?: boolean
 ): unknown;
+function renderPortalDetails(guid: string): unknown;
+
+interface IITCGlobals {
+    readonly addLayerGroup: typeof addLayerGroup;
+    readonly renderPortalDetails: typeof renderPortalDetails;
+    readonly addHook: typeof addHook;
+    readonly portals: typeof portals;
+}
 
 interface IITCPlugin extends Record<string, unknown> {
     (): void;
