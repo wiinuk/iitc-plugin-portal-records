@@ -5,6 +5,11 @@ declare namespace S2 {
             latLng: Readonly<S2LatLng>,
             level: number
         ): S2Cell;
+        export function FromFaceIJ(
+            face: number,
+            ij: readonly [number, number],
+            level: number
+        ): S2Cell;
     }
 }
 interface S2LatLng {
