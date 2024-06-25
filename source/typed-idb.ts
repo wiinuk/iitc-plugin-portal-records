@@ -1,4 +1,4 @@
-import { newAbortError } from "./standard-extensions";
+import { newAbortError, type Id } from "./standard-extensions";
 
 const privateTagSymbol = Symbol("privateTagSymbol");
 export type Tagged<TEntity, TTag> = TEntity & {
@@ -7,23 +7,49 @@ export type Tagged<TEntity, TTag> = TEntity & {
 function withTag<E, M>(value: E) {
     return value as unknown as Tagged<E, M>;
 }
-export type StoreSchemaKind = {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type UnwrapId<TId extends Id<any>> = TId extends Id<infer T> ? T : never;
+export interface IndexSchemaKind {
+    readonly key: string | string[];
+    readonly unique?: boolean;
+    readonly multiEntry?: boolean;
+}
+export interface StoreSchemaKind {
     /** record type */
-    readonly record: unknown;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    readonly record: Id<any>;
+    readonly key: string | string[];
     /** index name to key paths */
-    readonly indexes: Readonly<Record<string, string[]>>;
-};
+    readonly indexes: Readonly<Record<string, IndexSchemaKind>>;
+}
 export type DatabaseSchemaKind = Readonly<Record<string, StoreSchemaKind>>;
 export type Database<TSchema> = Tagged<IDBDatabase, TSchema>;
+
+function defineDatabase<TSchema extends DatabaseSchemaKind>(
+    database: IDBDatabase,
+    schema: TSchema
+) {
+    for (const [storeName, storeSchema] of Object.entries(schema)) {
+        const store = database.createObjectStore(storeName, {
+            keyPath: storeSchema.key.slice(),
+        });
+        for (const [indexName, options] of Object.entries(
+            storeSchema.indexes
+        )) {
+            store.createIndex(indexName, options.key, options);
+        }
+    }
+}
 
 export function openDatabase<TSchema extends DatabaseSchemaKind>(
     databaseName: string,
     databaseVersion: number | undefined,
-    onUpgradeNeeded: (database: IDBDatabase) => void
+    databaseSchema: TSchema
 ) {
     return new Promise<Database<TSchema>>((resolve, reject) => {
         const request = window.indexedDB.open(databaseName, databaseVersion);
-        request.onupgradeneeded = () => onUpgradeNeeded(request.result);
+        request.onupgradeneeded = () =>
+            defineDatabase(request.result, databaseSchema);
         request.onblocked = () => reject(new Error("database blocked"));
         request.onerror = () => reject(request.error);
         request.onsuccess = () => resolve(withTag(request.result));
@@ -33,7 +59,8 @@ export function openDatabase<TSchema extends DatabaseSchemaKind>(
 export interface IterateValuesRequest {
     readonly store: IDBObjectStore;
     readonly query: IDBValidKey | IDBKeyRange | null | undefined;
-    readonly action: (value: unknown) => "continue" | "return" | undefined;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    readonly action: (value: any) => "continue" | "return" | undefined;
 }
 interface TransactionalOperations {
     request(value: IDBRequest): unknown;
@@ -50,10 +77,6 @@ export type Store<TSchema, TStoreName> = Tagged<
     [TSchema, TStoreName]
 >;
 
-const enum ResolvingKind {
-    Request,
-    Cursor,
-}
 export function enterTransactionScope<
     TSchema extends DatabaseSchemaKind,
     TName extends keyof TSchema & string,
@@ -93,37 +116,41 @@ export function enterTransactionScope<
 
         const iterator = scope(store);
 
-        let resolvingKind: ResolvingKind | undefined;
-        let resolvingRequest: IDBRequest | undefined;
-        let resolvingCursorRequest:
+        const enum StateKind {
+            Request,
+            OpenCursor,
+        }
+        let stateKind: StateKind | undefined;
+        let request_request: IDBRequest | undefined;
+        let openCursor_request:
             | IDBRequest<IDBCursorWithValue | null>
             | undefined;
-        let resolvingCursorAction: IterateValuesRequest["action"] | undefined;
+        let openCursor_action: IterateValuesRequest["action"] | undefined;
         function onResolved() {
             let r;
-            switch (resolvingKind) {
+            switch (stateKind) {
                 case undefined:
                     r = iterator.next();
                     break;
-                case ResolvingKind.Request: {
+                case StateKind.Request: {
                     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-                    const result = resolvingRequest!.result;
-                    resolvingKind = undefined;
-                    resolvingRequest = undefined;
+                    const result = request_request!.result;
+                    stateKind = undefined;
+                    request_request = undefined;
                     r = iterator.next(result);
                     break;
                 }
-                case ResolvingKind.Cursor: {
+                case StateKind.OpenCursor: {
                     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-                    const cursor = resolvingCursorRequest!.result;
+                    const cursor = openCursor_request!.result;
                     if (
                         cursor === null ||
                         // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-                        resolvingCursorAction!(cursor.value) === "return"
+                        openCursor_action!(cursor.value) === "return"
                     ) {
-                        resolvingKind = undefined;
-                        resolvingCursorRequest = undefined;
-                        resolvingCursorAction = undefined;
+                        stateKind = undefined;
+                        openCursor_request = undefined;
+                        openCursor_action = undefined;
                         r = iterator.next(undefined);
                     } else {
                         cursor.continue();
@@ -132,9 +159,7 @@ export function enterTransactionScope<
                     break;
                 }
                 default: {
-                    reject(
-                        new Error(`Invalid resolving kind: ${resolvingKind}`)
-                    );
+                    reject(new Error(`Invalid resolving kind: ${stateKind}`));
                     return;
                 }
             }
@@ -145,17 +170,15 @@ export function enterTransactionScope<
             }
             const yieldValue = r.value;
             if (yieldValue instanceof IDBRequest) {
-                resolvingKind = ResolvingKind.Request;
-                resolvingRequest = yieldValue;
+                stateKind = StateKind.Request;
+                request_request = yieldValue;
                 yieldValue.onsuccess = onResolved;
                 return;
             }
-            resolvingKind = ResolvingKind.Cursor;
-            resolvingCursorRequest = yieldValue.store.openCursor(
-                yieldValue.query
-            );
-            resolvingCursorAction = yieldValue.action;
-            resolvingCursorRequest.onsuccess = onResolved;
+            stateKind = StateKind.OpenCursor;
+            openCursor_request = yieldValue.store.openCursor(yieldValue.query);
+            openCursor_action = yieldValue.action;
+            openCursor_request.onsuccess = onResolved;
         }
         onResolved();
     });
@@ -174,34 +197,63 @@ export function getIndex<
 ): Index<TSchema, TStoreName, TIndexName> {
     return withTag(store.index(indexName));
 }
-type resolveProps<TPropertyNames extends readonly string[], TRecordType> = {
-    [i in keyof TPropertyNames]: TPropertyNames[i] extends keyof TRecordType
-        ? TRecordType[TPropertyNames[i]] extends IDBValidKey
-            ? TRecordType[TPropertyNames[i]]
-            : never
-        : never;
-};
+type resolveKey<
+    propertyName extends string,
+    recordType
+> = propertyName extends keyof recordType
+    ? recordType[propertyName] extends IDBValidKey
+        ? recordType[propertyName]
+        : never
+    : never;
 
+type resolveKeyArray<propertyNames extends readonly string[], recordType> = {
+    [i in keyof propertyNames]: resolveKey<propertyNames[i], recordType>;
+};
+type resolveKeys<
+    keys extends string | readonly string[],
+    recordType
+> = keys extends string
+    ? resolveKey<keys, recordType>
+    : keys extends readonly string[]
+    ? resolveKeyArray<keys, recordType>
+    : never;
+
+export function* getValueOfKey<
+    TSchema extends DatabaseSchemaKind,
+    TStoreName extends keyof TSchema & string
+>(
+    store: Store<TSchema, TStoreName>,
+    key: resolveKeys<
+        TSchema[TStoreName]["key"],
+        UnwrapId<TSchema[TStoreName]["record"]>
+    >
+) {
+    return (yield store.get(key)) as
+        | UnwrapId<TSchema[TStoreName]["record"]>
+        | undefined;
+}
 export function* getValueOfIndex<
     TSchema extends DatabaseSchemaKind,
     TStoreName extends keyof TSchema & string,
     TIndexName extends keyof TSchema[TStoreName]["indexes"] & string
 >(
     index: Index<TSchema, TStoreName, TIndexName>,
-    key: resolveProps<
-        TSchema[TStoreName]["indexes"][TIndexName],
-        TSchema[TStoreName]["record"]
+    key: resolveKeys<
+        TSchema[TStoreName]["indexes"][TIndexName]["key"],
+        UnwrapId<TSchema[TStoreName]["record"]>
     >
-): TransactionScope<TSchema[TStoreName]["record"] | undefined> {
-    return (yield index.get(key)) as TSchema[TStoreName]["record"] | undefined;
+): TransactionScope<UnwrapId<TSchema[TStoreName]["record"]> | undefined> {
+    return (yield index.get(key)) as
+        | UnwrapId<TSchema[TStoreName]["record"]>
+        | undefined;
 }
 export function* putValue<
     TSchema extends DatabaseSchemaKind,
     TStoreName extends keyof TSchema & string
 >(
     store: Store<TSchema, TStoreName>,
-    value: TSchema[TStoreName]["record"]
-): TransactionScope<TSchema[TStoreName]["record"]> {
+    value: UnwrapId<TSchema[TStoreName]["record"]>
+): TransactionScope<UnwrapId<TSchema[TStoreName]["record"]>> {
     yield store.put(value);
     return value;
 }
@@ -211,7 +263,7 @@ export function* iterateValues<
 >(
     store: Store<TSchema, TStoreName>,
     action: (
-        value: TSchema[TStoreName]["record"]
+        value: UnwrapId<TSchema[TStoreName]["record"]>
     ) => "continue" | "return" | undefined
 ): TransactionScope<void> {
     yield { store, query: null, action };
