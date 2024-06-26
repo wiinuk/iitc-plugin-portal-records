@@ -1,4 +1,4 @@
-import { newAbortError, type Id } from "./standard-extensions";
+import { ignore, newAbortError, type Id } from "./standard-extensions";
 
 const privateTagSymbol = Symbol("privateTagSymbol");
 export type Tagged<TEntity, TTag> = TEntity & {
@@ -23,7 +23,10 @@ export interface StoreSchemaKind {
     readonly indexes: Readonly<Record<string, IndexSchemaKind>>;
 }
 export type DatabaseSchemaKind = Readonly<Record<string, StoreSchemaKind>>;
-export type Database<TSchema> = Tagged<IDBDatabase, TSchema>;
+export type Database<TSchema extends DatabaseSchemaKind> = Tagged<
+    IDBDatabase,
+    TSchema
+>;
 
 function defineDatabase<TSchema extends DatabaseSchemaKind>(
     database: IDBDatabase,
@@ -48,11 +51,16 @@ export function openDatabase<TSchema extends DatabaseSchemaKind>(
 ) {
     return new Promise<Database<TSchema>>((resolve, reject) => {
         const request = window.indexedDB.open(databaseName, databaseVersion);
-        request.onupgradeneeded = () =>
-            defineDatabase(request.result, databaseSchema);
-        request.onblocked = () => reject(new Error("database blocked"));
-        request.onerror = () => reject(request.error);
-        request.onsuccess = () => resolve(withTag(request.result));
+        request.addEventListener("upgradeneeded", () =>
+            defineDatabase(request.result, databaseSchema)
+        );
+        request.addEventListener("blocked", () =>
+            reject(new Error("database blocked"))
+        );
+        request.addEventListener("error", () => reject(request.error));
+        request.addEventListener("success", () =>
+            resolve(withTag(request.result))
+        );
     });
 }
 
@@ -73,30 +81,39 @@ export type TransactionScope<R> = Generator<
     ReturnType<TransactionalOperations[keyof TransactionalOperations]>
 >;
 
-export type Store<TSchema, TStoreName> = Tagged<
-    IDBObjectStore,
-    [TSchema, TStoreName]
->;
+export type Store<
+    TSchema extends DatabaseSchemaKind,
+    TStoreName extends keyof TSchema & string
+> = Tagged<IDBObjectStore, [TSchema, TStoreName]>;
+
+type As<T, K> = T extends K ? T : K;
+export type Stores<
+    TSchema extends DatabaseSchemaKind,
+    TStoreNames extends readonly (keyof TSchema & string)[]
+> = {
+    [p in TStoreNames[number]]: Store<TSchema, As<p, keyof TSchema & string>>;
+};
 
 export function enterTransactionScope<
     TSchema extends DatabaseSchemaKind,
-    TName extends keyof TSchema & string,
+    TStoreNames extends readonly (keyof TSchema & string)[],
     TResult
 >(
     database: Database<TSchema>,
     {
-        storeName,
         mode,
         signal,
     }: {
-        storeName: TName;
         mode: IDBTransactionMode;
-        signal: AbortSignal;
+        signal?: AbortSignal;
     },
-    scope: (store: Store<TSchema, TName>) => TransactionScope<TResult>
+    scope: (
+        stores: Readonly<Stores<TSchema, TStoreNames>>
+    ) => TransactionScope<TResult>,
+    ...storeNames: TStoreNames
 ): Promise<TResult> {
     return new Promise<TResult>((resolve, reject) => {
-        if (signal.aborted) {
+        if (signal?.aborted) {
             reject(newAbortError());
             return;
         }
@@ -104,24 +121,27 @@ export function enterTransactionScope<
         let hasResult = false;
         let result: TResult;
 
-        const transaction = database.transaction(storeName, mode);
+        const transaction = database.transaction(storeNames, mode);
 
-        const onAbort = () => transaction.abort();
-        transaction.oncomplete = () => {
-            signal.removeEventListener("abort", onAbort);
+        const onAbort = signal ? () => transaction.abort() : ignore;
+        transaction.addEventListener("complete", () => {
+            signal?.removeEventListener("abort", onAbort);
             hasResult ? resolve(result) : reject(new Error(`internal error`));
-        };
-        transaction.onerror = function (e) {
-            signal.removeEventListener("abort", onAbort);
+        });
+        transaction.addEventListener("error", (e) => {
+            signal?.removeEventListener("abort", onAbort);
             reject((e.target as IDBRequest).error);
-        };
-        signal.addEventListener("abort", onAbort);
+        });
+        signal?.addEventListener("abort", onAbort);
 
-        const store: Store<TSchema, TName> = withTag(
-            transaction.objectStore(storeName)
+        const stores: Partial<Stores<TSchema, TStoreNames>> = {};
+        for (const name of storeNames) {
+            stores[name] = withTag(transaction.objectStore(name));
+        }
+
+        const iterator = scope(
+            stores as Readonly<Stores<TSchema, TStoreNames>>
         );
-
-        const iterator = scope(store);
 
         const enum StateKind {
             Request,
@@ -190,10 +210,11 @@ export function enterTransactionScope<
         onResolved();
     });
 }
-export type Index<TSchema, TStoreName, TIndexName> = Tagged<
-    IDBIndex,
-    [TSchema, TStoreName, TIndexName]
->;
+export type Index<
+    TSchema extends DatabaseSchemaKind,
+    TStoreName extends keyof TSchema & string,
+    TIndexName extends keyof TSchema[TStoreName]["indexes"] & string
+> = Tagged<IDBIndex, [TSchema, TStoreName, TIndexName]>;
 export function getIndex<
     TSchema extends DatabaseSchemaKind,
     TStoreName extends keyof TSchema & string,
