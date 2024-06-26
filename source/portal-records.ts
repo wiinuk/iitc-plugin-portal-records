@@ -1,26 +1,33 @@
+// spell-checker: ignore Lngs
 import { id } from "./standard-extensions";
 import * as Idb from "./typed-idb";
-
-/** `S2Cell.prototype.toString` で得られる ID */
-export type CellId = string;
+import {
+    createCellFromCoordinates,
+    getCellId,
+    type Cell14Id,
+    type Cell17Id,
+    type CellId,
+    type S2Cell,
+} from "./typed-s2cell";
 
 /** ローカルマシンから取得した時間 */
 type ClientDate = number;
 export interface PortalRecord {
-    /** key */
     readonly guid: string;
-    /** index: coordinates */
     readonly lat: number;
-    /** index: coordinates */
     readonly lng: number;
     readonly name: string;
     readonly data: IITCPortalData;
     readonly lastFetchDate: ClientDate;
 
-    /** index: cell17Id */
-    readonly cell17Id: CellId;
-    /** index: cell14Id */
-    readonly cell14Id: CellId;
+    readonly cell17Id: Cell17Id;
+    readonly cell14Id: Cell14Id;
+}
+export interface CellRecord<TLevel extends number> {
+    readonly cellId: CellId<TLevel>;
+    readonly lastFetchDate: ClientDate;
+    readonly centerLat: number;
+    readonly centerLng: number;
 }
 const databaseSchema = {
     portals: {
@@ -34,66 +41,67 @@ const databaseSchema = {
             cell14Id: { key: "cell14Id" },
         },
     },
+    cell14s: {
+        recordType: id<CellRecord<14>>,
+        key: "cellId",
+        indexes: {},
+    },
 } as const satisfies Idb.DatabaseSchemaKind;
 type DatabaseSchema = typeof databaseSchema;
 
-export interface PortalsStore {
-    getPortalOfGuid(
-        guid: string
-    ): Idb.TransactionScope<PortalRecord | undefined>;
-    getPortalOfCoordinates(
-        lat: number,
-        lng: number
-    ): Idb.TransactionScope<PortalRecord | undefined>;
-    setPortal(value: PortalRecord): Idb.TransactionScope<PortalRecord>;
-    removePortal(guid: string): Idb.TransactionScope<void>;
-
-    iteratePortals(
-        action: (value: PortalRecord) => Idb.IterationFlow
-    ): Idb.TransactionScope<void>;
-
-    iteratePortalsInCell14(
-        cell14Id: CellId,
-        action: (portal: PortalRecord) => Idb.IterationFlow
-    ): Idb.TransactionScope<void>;
-    iteratePortalsInCell17(
-        cell17Id: CellId,
-        action: (portal: PortalRecord) => Idb.IterationFlow
-    ): Idb.TransactionScope<void>;
-}
+export type PortalsStore = ReturnType<typeof createPortalStore>;
 export interface PortalRecords {
     enterTransactionScope<R>(
-        options: { signal: AbortSignal },
+        options: { signal?: AbortSignal } | null | undefined,
         scope: (portals: PortalsStore) => Idb.TransactionScope<R>
     ): Promise<R>;
 }
-function createPortalStore(
-    portals: Idb.Store<DatabaseSchema, "portals">
-): PortalsStore {
+function createPortalStore({
+    portals,
+    cell14s,
+}: Readonly<{
+    portals: Idb.Store<DatabaseSchema, "portals">;
+    cell14s: Idb.Store<DatabaseSchema, "cell14s">;
+}>) {
     const coordinatesIndex = Idb.getIndex(portals, "coordinates");
     const cell14IdIndex = Idb.getIndex(portals, "cell14Id");
     const cell17IdIndex = Idb.getIndex(portals, "cell17Id");
     return {
-        getPortalOfGuid(guid) {
+        getPortalOfGuid(guid: string) {
             return Idb.getValue(portals, guid);
         },
-        getPortalOfCoordinates(lat, lng) {
+        getPortalOfCoordinates(lat: number, lng: number) {
             return Idb.getValueOfIndex(coordinatesIndex, [lat, lng]);
         },
-        setPortal(value) {
+        setPortal(value: PortalRecord) {
             return Idb.putValue(portals, value);
         },
-        removePortal(guid) {
+        removePortal(guid: string) {
             return Idb.deleteValue(portals, guid);
         },
-        iteratePortals(action) {
+        iteratePortals(action: (value: PortalRecord) => Idb.IterationFlow) {
             return Idb.iterateValues(portals, null, action);
         },
-        iteratePortalsInCell14(cell14Id, action) {
+        iteratePortalsInCell14(
+            cell14Id: Cell14Id,
+            action: (portal: PortalRecord) => Idb.IterationFlow
+        ) {
             return Idb.iterateValuesOfIndex(cell14IdIndex, cell14Id, action);
         },
-        iteratePortalsInCell17(cell17Id, action) {
+        iteratePortalsInCell17(
+            cell17Id: Cell17Id,
+            action: (portal: PortalRecord) => Idb.IterationFlow
+        ) {
             return Idb.iterateValuesOfIndex(cell17IdIndex, cell17Id, action);
+        },
+        getCell14(cell14Id: Cell14Id) {
+            return Idb.getValue(cell14s, cell14Id);
+        },
+        setCell14(cell: CellRecord<14>) {
+            return Idb.putValue(cell14s, cell);
+        },
+        iterateCell14s(action: (cell14: CellRecord<14>) => Idb.IterationFlow) {
+            return Idb.iterateValues(cell14s, null, action);
         },
     };
 }
@@ -107,12 +115,188 @@ export async function openRecords(): Promise<PortalRecords> {
         databaseSchema
     );
     return {
-        enterTransactionScope({ signal }, scope) {
+        enterTransactionScope(options, scope) {
             return Idb.enterTransactionScope(
                 database,
-                { storeName: "portals", mode: "readwrite", signal },
-                (portals) => scope(createPortalStore(portals))
+                { mode: "readwrite", signal: options?.signal },
+                (stores) => scope(createPortalStore(stores)),
+                "portals",
+                "cell14s"
             );
         },
     };
+}
+
+function isSponsoredPortal({ name }: PortalRecord) {
+    return /ローソン|Lawson|ソフトバンク|Softbank|ワイモバイル|Y!mobile/.test(
+        name
+    );
+}
+
+function setEntry<K, V>(map: Map<K, V>, key: K, value: V): V {
+    map.set(key, value);
+    return value;
+}
+function boundsIncludesCell<TLevel extends number>(
+    cell: S2Cell<TLevel>,
+    bounds: L.LatLngBounds
+) {
+    for (const corner of cell.getCornerLatLngs()) {
+        if (!bounds.contains(corner)) return false;
+    }
+    return true;
+}
+
+/** 指定された領域に近いセルを返す */
+function getNearlyCellsForBounds<TLevel extends number>(
+    bounds: L.LatLngBounds,
+    level: TLevel
+) {
+    const result: S2Cell<TLevel>[] = [];
+    const seenCellIds = new Set<CellId<TLevel>>();
+    const remainingCells = [
+        createCellFromCoordinates(bounds.getCenter(), level),
+    ];
+    for (let cell; (cell = remainingCells.pop()); ) {
+        const id = cell.toString();
+        if (seenCellIds.has(id)) continue;
+        seenCellIds.add(id);
+
+        const corners = cell.getCornerLatLngs();
+        if (!bounds.intersects(L.latLngBounds(corners))) continue;
+        result.push(cell);
+        remainingCells.push(...cell.getNeighbors());
+    }
+    return result;
+}
+
+/** データベース中からセル14中のポータルを返す */
+function* getPortalsInCell14s(
+    store: PortalsStore,
+    cell14s: readonly S2Cell<14>[]
+) {
+    const portals: PortalRecord[] = [];
+    for (const cell14 of cell14s) {
+        yield* store.iteratePortalsInCell14(cell14.toString(), (portal) => {
+            portals.push(portal);
+            return "continue";
+        });
+    }
+    return portals;
+}
+
+export async function updateRecordsOfCurrentPortals(
+    records: PortalRecords,
+    portals: Record<string, IITCPortalInfo>,
+    fetchBounds: L.LatLngBounds,
+    fetchDate: number,
+    signal: AbortSignal
+) {
+    const cell14s = getNearlyCellsForBounds(fetchBounds, 14);
+    await records.enterTransactionScope({ signal }, function* (portalsStore) {
+        // 領域内の古いポータルを削除
+        for (const portal of yield* getPortalsInCell14s(
+            portalsStore,
+            cell14s
+        )) {
+            const coordinates = L.latLng(portal.lat, portal.lng);
+            if (!fetchBounds.contains(coordinates)) continue;
+            yield* portalsStore.removePortal(portal.guid);
+        }
+
+        // ポータルを追加
+        for (const [guid, p] of Object.entries(portals)) {
+            const latLng = p.getLatLng();
+            const name = p.options.data.title ?? "";
+            const portal = (yield* portalsStore.getPortalOfGuid(guid)) ?? {
+                guid,
+                lat: latLng.lat,
+                lng: latLng.lng,
+                name,
+                data: p.options.data,
+                cell14Id: getCellId(latLng, 14),
+                cell17Id: getCellId(latLng, 17),
+                lastFetchDate: fetchDate,
+            };
+
+            yield* portalsStore.setPortal({
+                ...portal,
+                name: name !== "" ? name : portal.name,
+                lat: latLng.lat,
+                lng: latLng.lng,
+                data: p.options.data,
+                cell14Id: getCellId(latLng, 14),
+                cell17Id: getCellId(latLng, 17),
+            });
+        }
+
+        // 全面が取得されたセル14を更新
+        for (const cell14 of cell14s) {
+            if (!boundsIncludesCell(cell14, fetchBounds)) continue;
+
+            const coordinates = cell14.getLatLng();
+            yield* portalsStore.setCell14({
+                cellId: cell14.toString(),
+                centerLat: coordinates.lat,
+                centerLng: coordinates.lng,
+                lastFetchDate: fetchDate,
+            });
+        }
+    });
+}
+
+interface Cell17 {
+    readonly cell: S2Cell<17>;
+    count: number;
+}
+export interface Cell14 {
+    readonly cell17s: Map<Cell17Id, Cell17>;
+    readonly corner: [S2LatLng, S2LatLng, S2LatLng, S2LatLng];
+    readonly cell: S2Cell<14>;
+    readonly portals: Map<string, PortalRecord>;
+}
+export async function getVisibleCells(
+    records: PortalRecords,
+    bounds: L.LatLngBounds,
+    signal: AbortSignal
+) {
+    const cells = new Map<string, Cell14>();
+    return await records.enterTransactionScope({ signal }, function* (store) {
+        const visibleCells = new Map<Cell14Id, Cell14>();
+        const nearlyCell14s = getNearlyCellsForBounds(bounds, 14);
+        for (const portal of yield* getPortalsInCell14s(store, nearlyCell14s)) {
+            if (isSponsoredPortal(portal)) continue;
+
+            const latLng = L.latLng(portal.lat, portal.lng);
+            const cell = createCellFromCoordinates(latLng, 14);
+            const key = cell.toString();
+            const cell14 =
+                cells.get(key) ??
+                setEntry(cells, key, {
+                    portals: new Map<string, PortalRecord>(),
+                    cell,
+                    corner: cell.getCornerLatLngs(),
+                    cell17s: new Map<Cell17Id, Cell17>(),
+                });
+
+            const coordinateKey = latLng.toString();
+            if (cell14.portals.get(coordinateKey) == null) {
+                cell14.portals.set(coordinateKey, portal);
+                const cell17 = createCellFromCoordinates(latLng, 17);
+                const cell17Key = cell17.toString();
+                const cell17Cell =
+                    cell14.cell17s.get(cell17Key) ??
+                    setEntry(cell14.cell17s, cell17Key, {
+                        cell: cell17,
+                        count: 0,
+                    });
+                cell17Cell.count++;
+            }
+
+            if (bounds.contains(latLng) && visibleCells.get(key) == null) {
+                visibleCells.set(key, cell14);
+            }
+        }
+        return visibleCells.values();
+    });
 }
