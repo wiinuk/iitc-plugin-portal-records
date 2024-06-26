@@ -1,10 +1,12 @@
-// spell-checker: ignore layeradd Lngs
+// spell-checker: ignore layeradd Lngs moveend
 import { addStyle, waitElementLoaded } from "./document-extensions";
 import { isIITCMobile } from "./environment";
 import {
     openRecords,
+    type CellId,
     type PortalRecord,
     type PortalRecords,
+    type PortalsStore,
 } from "./portal-records";
 import { createAsyncCancelScope, error } from "./standard-extensions";
 import classNames, { cssText } from "./styles.module.css";
@@ -55,13 +57,13 @@ function isSponsoredPortal({ name }: PortalRecord) {
 }
 
 interface Cell17 {
-    readonly cell: S2Cell;
+    readonly cell: S2.S2Cell;
     count: number;
 }
 interface Cell14 {
     readonly cell17s: Map<string, Cell17>;
     readonly corner: [S2LatLng, S2LatLng, S2LatLng, S2LatLng];
-    readonly cell: S2Cell;
+    readonly cell: S2.S2Cell;
     readonly portals: Map<string, PortalRecord>;
 }
 function createOptions() {
@@ -115,14 +117,17 @@ function createOptions() {
 }
 async function getVisibleCells(
     records: PortalRecords,
-    cells: Map<string, Cell14>,
     bounds: L.LatLngBounds,
     signal: AbortSignal
 ) {
-    return await records.enterTransactionScope(function* (portals) {
-        const visibleCells = new Map<string, Cell14>();
-        yield* portals.iterateValues((portal) => {
-            if (isSponsoredPortal(portal)) return "continue";
+    const cells = new Map<string, Cell14>();
+    return await records.enterTransactionScope({ signal }, function* (store) {
+        const visibleCells = new Map<CellId, Cell14>();
+        for (const portal of yield* getPortalInNearlyCell14sForBounds(
+            store,
+            bounds
+        )) {
+            if (isSponsoredPortal(portal)) continue;
 
             const latLng = L.latLng(portal.lat, portal.lng);
             const cell = S2.S2Cell.FromLatLng(latLng, 14);
@@ -133,7 +138,7 @@ async function getVisibleCells(
                     portals: new Map<string, PortalRecord>(),
                     cell,
                     corner: cell.getCornerLatLngs(),
-                    cell17s: new Map<string, Cell17>(),
+                    cell17s: new Map<CellId, Cell17>(),
                 });
 
             const coordinateKey = latLng.toString();
@@ -153,65 +158,122 @@ async function getVisibleCells(
             if (bounds.contains(latLng) && visibleCells.get(key) == null) {
                 visibleCells.set(key, cell14);
             }
+        }
+        return visibleCells.values();
+    });
+}
+
+function getCellId(latLng: L.LatLng, level: number) {
+    return S2.S2Cell.FromLatLng(latLng, level).toString();
+}
+
+/** 指定された領域に近いセルを返す */
+function getNearlyCellIdsForBounds(bounds: L.LatLngBounds, level: number) {
+    const result: CellId[] = [];
+    const seenCellIds = new Set<CellId>();
+    const remainingCells = [S2.S2Cell.FromLatLng(bounds.getCenter(), level)];
+    for (let cell; (cell = remainingCells.pop()); ) {
+        const id: CellId = cell.toString();
+        if (seenCellIds.has(id)) continue;
+        seenCellIds.add(id);
+
+        const corners = cell.getCornerLatLngs();
+        if (!bounds.intersects(L.latLngBounds(corners))) continue;
+        result.push(id);
+        remainingCells.push(...cell.getNeighbors());
+    }
+    return result;
+}
+
+/** データベースから、指定された領域に近いセル14中のポータルを返す */
+function* getPortalInNearlyCell14sForBounds(
+    store: PortalsStore,
+    bounds: L.LatLngBounds
+) {
+    const portals: PortalRecord[] = [];
+    for (const cell14Id of getNearlyCellIdsForBounds(bounds, 14)) {
+        yield* store.iteratePortalsInCell14(cell14Id, (portal) => {
+            portals.push(portal);
+            return "continue";
         });
-        return visibleCells;
-    }, signal);
+    }
+    return portals;
 }
 
 async function updateRecordsOfCurrentPortals(
     records: PortalRecords,
     portals: Record<string, IITCPortalInfo>,
+    fetchBounds: L.LatLngBounds,
+    fetchDate: number,
     signal: AbortSignal
 ) {
-    await records.enterTransactionScope(function* (portalsStore) {
-        for (const [guid, p] of Object.entries(portals)) {
-            const name = p.options.data.title ?? "";
-            const latLng = p.getLatLng();
-            const cachedPortal =
-                (yield* portalsStore.getValueOfCoordinates(
-                    latLng.lat,
-                    latLng.lng
-                )) ??
-                (yield* portalsStore.setValue({
-                    lat: latLng.lat,
-                    lng: latLng.lng,
-                    name,
-                    guid,
-                    data: p.options.data,
-                }));
-
-            if (cachedPortal.name == "") {
-                yield* portalsStore.setValue({ ...cachedPortal, name });
-            }
-            yield* portalsStore.setValue({ ...cachedPortal, guid });
+    await records.enterTransactionScope({ signal }, function* (portalsStore) {
+        // 領域内の古いポータルを削除
+        for (const portal of yield* getPortalInNearlyCell14sForBounds(
+            portalsStore,
+            fetchBounds
+        )) {
+            const coordinates = L.latLng(portal.lat, portal.lng);
+            if (!fetchBounds.contains(coordinates)) continue;
+            yield* portalsStore.removePortal(portal.guid);
         }
-    }, signal);
+
+        for (const [guid, p] of Object.entries(portals)) {
+            const latLng = p.getLatLng();
+            const name = p.options.data.title ?? "";
+            const portal = (yield* portalsStore.getPortalOfGuid(guid)) ?? {
+                guid,
+                lat: latLng.lat,
+                lng: latLng.lng,
+                name,
+                data: p.options.data,
+                cell14Id: getCellId(latLng, 14),
+                cell17Id: getCellId(latLng, 17),
+                lastFetchDate: fetchDate,
+            };
+
+            yield* portalsStore.setPortal({
+                ...portal,
+                name: name !== "" ? name : portal.name,
+                lat: latLng.lat,
+                lng: latLng.lng,
+                data: p.options.data,
+                cell14Id: getCellId(latLng, 14),
+                cell17Id: getCellId(latLng, 17),
+            });
+        }
+    });
 }
 function updateS2CellLayers(
-    s2CellLayer: L.LayerGroup<L.ILayer>,
-    visibleCells: ReadonlyMap<string, Cell14>,
+    layer: L.LayerGroup<L.ILayer>,
+    visibleCells: Iterable<Cell14>,
+    isRefreshEnd: boolean,
     cellOptions: ReturnType<typeof createOptions>
 ) {
-    s2CellLayer.clearLayers();
-    for (const { corner, cell17s, portals } of visibleCells.values()) {
+    const isLatest = isRefreshEnd && 14 < map.getZoom();
+
+    layer.clearLayers();
+    for (const { corner, cell17s, portals } of visibleCells) {
         const options =
             cellOptions.cell17CountToOptions.get(cell17s.size) ??
             cellOptions.cell17NonZeroOptions;
         const polygon = L.polygon(corner, options);
-        s2CellLayer.addLayer(polygon);
-        if (map.getZoom() > 13) {
+        layer.addLayer(polygon);
+        if (13 < map.getZoom()) {
             const center = polygon.getBounds().getCenter();
             const label = L.marker(center, {
                 clickable: true,
                 icon: L.divIcon({
-                    className: classNames["icon"],
+                    className: isLatest
+                        ? classNames["icon"]
+                        : classNames["obsolete-icon"],
                     iconSize: [50, 50],
                     html: cell17s.size + "/" + portals.size,
                 }),
             });
-            s2CellLayer.addLayer(label);
+            layer.addLayer(label);
         }
-        if (map.getZoom() > 14) {
+        if (14 < map.getZoom()) {
             for (const cell17 of cell17s.values()) {
                 const polygon17 = L.polygon(
                     cell17.cell.getCornerLatLngs(),
@@ -219,7 +281,7 @@ function updateS2CellLayers(
                         ? cellOptions.cell17DuplicatedOptions
                         : cellOptions.cell17Options
                 );
-                s2CellLayer.addLayer(polygon17);
+                layer.addLayer(polygon17);
             }
         }
     }
@@ -268,24 +330,46 @@ async function asyncMain() {
     addStyle(cssText);
     const records = await openRecords();
     const cellOptions = createOptions();
-    const cells = new Map<string, Cell14>();
 
-    async function updateLayersAsync(signal: AbortSignal) {
-        await updateRecordsOfCurrentPortals(records, iitc.portals, signal);
+    async function updateLayersAsync(
+        isRefreshEnd: boolean,
+        signal: AbortSignal
+    ) {
+        if (map.getZoom() <= 13) {
+            s2CellLayer.clearLayers();
+            return;
+        }
+        if (isRefreshEnd && 14 < map.getZoom()) {
+            await updateRecordsOfCurrentPortals(
+                records,
+                iitc.portals,
+                map.getBounds(),
+                Date.now(),
+                signal
+            );
+        }
         const visibleCells = await getVisibleCells(
             records,
-            cells,
             map.getBounds(),
             signal
         );
-        updateS2CellLayers(s2CellLayer, visibleCells, cellOptions);
+        updateS2CellLayers(
+            s2CellLayer,
+            visibleCells,
+            isRefreshEnd,
+            cellOptions
+        );
     }
 
     const updateRecordsAsyncCancelScope =
         createAsyncCancelScope(handleAsyncError);
-    function updateLayers() {
-        updateRecordsAsyncCancelScope(updateLayersAsync);
+    function updateLayers(isRefreshEnd: boolean) {
+        updateRecordsAsyncCancelScope((signal) =>
+            updateLayersAsync(isRefreshEnd, signal)
+        );
     }
-    iitc.addHook("mapDataRefreshStart", updateLayers);
-    iitc.addHook("mapDataRefreshEnd", updateLayers);
+
+    updateLayers(false);
+    map.on("moveend", () => updateLayers(false));
+    iitc.addHook("mapDataRefreshEnd", () => updateLayers(true));
 }
