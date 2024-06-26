@@ -6,7 +6,7 @@
 // @downloadURL  https://github.com/wiinuk/iitc-plugin-portal-records/raw/main/iitc-plugin-portal-records.user.js
 // @updateURL    https://github.com/wiinuk/iitc-plugin-portal-records/raw/main/iitc-plugin-portal-records.user.js
 // @homepageURL  https://github.com/wiinuk/iitc-plugin-portal-records
-// @version      0.2.1
+// @version      0.2.2
 // @description  IITC plugin to assist in Pokémon GO route creation.
 // @author       Wiinuk
 // @include      https://*.ingress.com/intel*
@@ -384,11 +384,6 @@ function enterTransactionScope(database, { mode, signal, }, scope, ...storeNames
             stores[name] = withTag(transaction.objectStore(name));
         }
         const iterator = scope(stores);
-        let StateKind;
-        (function (StateKind) {
-            StateKind[StateKind["Request"] = 0] = "Request";
-            StateKind[StateKind["OpenCursor"] = 1] = "OpenCursor";
-        })(StateKind || (StateKind = {}));
         let stateKind;
         let request_request;
         let openCursor_request;
@@ -399,7 +394,7 @@ function enterTransactionScope(database, { mode, signal, }, scope, ...storeNames
                 case undefined:
                     r = iterator.next();
                     break;
-                case StateKind.Request: {
+                case "Request": {
                     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
                     const result = request_request.result;
                     stateKind = undefined;
@@ -407,7 +402,7 @@ function enterTransactionScope(database, { mode, signal, }, scope, ...storeNames
                     r = iterator.next(result);
                     break;
                 }
-                case StateKind.OpenCursor: {
+                case "OpenCursor": {
                     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
                     const cursor = openCursor_request.result;
                     if (cursor === null ||
@@ -436,12 +431,12 @@ function enterTransactionScope(database, { mode, signal, }, scope, ...storeNames
             }
             const yieldValue = r.value;
             if (yieldValue instanceof IDBRequest) {
-                stateKind = StateKind.Request;
+                stateKind = "Request";
                 request_request = yieldValue;
                 yieldValue.onsuccess = onResolved;
                 return;
             }
-            stateKind = StateKind.OpenCursor;
+            stateKind = "OpenCursor";
             openCursor_request = yieldValue.source.openCursor(yieldValue.query);
             openCursor_action = yieldValue.action;
             openCursor_request.onsuccess = onResolved;

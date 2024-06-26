@@ -143,11 +143,8 @@ export function enterTransactionScope<
             stores as Readonly<Stores<TSchema, TStoreNames>>
         );
 
-        const enum StateKind {
-            Request,
-            OpenCursor,
-        }
-        let stateKind: StateKind | undefined;
+        type ResolvingStateKind = "Request" | "OpenCursor";
+        let stateKind: ResolvingStateKind | undefined;
         let request_request: IDBRequest | undefined;
         let openCursor_request:
             | IDBRequest<IDBCursorWithValue | null>
@@ -159,7 +156,7 @@ export function enterTransactionScope<
                 case undefined:
                     r = iterator.next();
                     break;
-                case StateKind.Request: {
+                case "Request": {
                     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
                     const result = request_request!.result;
                     stateKind = undefined;
@@ -167,7 +164,7 @@ export function enterTransactionScope<
                     r = iterator.next(result);
                     break;
                 }
-                case StateKind.OpenCursor: {
+                case "OpenCursor": {
                     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
                     const cursor = openCursor_request!.result;
                     if (
@@ -197,12 +194,12 @@ export function enterTransactionScope<
             }
             const yieldValue = r.value;
             if (yieldValue instanceof IDBRequest) {
-                stateKind = StateKind.Request;
+                stateKind = "Request";
                 request_request = yieldValue;
                 yieldValue.onsuccess = onResolved;
                 return;
             }
-            stateKind = StateKind.OpenCursor;
+            stateKind = "OpenCursor";
             openCursor_request = yieldValue.source.openCursor(yieldValue.query);
             openCursor_action = yieldValue.action;
             openCursor_request.onsuccess = onResolved;
