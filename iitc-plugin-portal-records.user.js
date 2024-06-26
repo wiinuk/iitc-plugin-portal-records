@@ -6,7 +6,7 @@
 // @downloadURL  https://github.com/wiinuk/iitc-plugin-portal-records/raw/master/iitc-plugin-portal-records.user.js
 // @updateURL    https://github.com/wiinuk/iitc-plugin-portal-records/raw/master/iitc-plugin-portal-records.user.js
 // @homepageURL  https://github.com/wiinuk/iitc-plugin-portal-records
-// @version      0.1.0
+// @version      0.2.0
 // @description  IITC plugin to assist in Pokémon GO route creation.
 // @author       Wiinuk
 // @include      https://*.ingress.com/intel*
@@ -341,68 +341,81 @@ const privateTagSymbol = Symbol("privateTagSymbol");
 function withTag(value) {
     return value;
 }
-function openDatabase(databaseName, databaseVersion, onUpgradeNeeded) {
+function defineDatabase(database, schema) {
+    for (const [storeName, storeSchema] of Object.entries(schema)) {
+        const store = database.createObjectStore(storeName, {
+            keyPath: storeSchema.key.slice(),
+        });
+        for (const [indexName, options] of Object.entries(storeSchema.indexes)) {
+            store.createIndex(indexName, options.key, options);
+        }
+    }
+}
+function openDatabase(databaseName, databaseVersion, databaseSchema) {
     return new Promise((resolve, reject) => {
         const request = window.indexedDB.open(databaseName, databaseVersion);
-        request.onupgradeneeded = () => onUpgradeNeeded(request.result);
-        request.onblocked = () => reject(new Error("database blocked"));
-        request.onerror = () => reject(request.error);
-        request.onsuccess = () => resolve(withTag(request.result));
+        request.addEventListener("upgradeneeded", () => defineDatabase(request.result, databaseSchema));
+        request.addEventListener("blocked", () => reject(new Error("database blocked")));
+        request.addEventListener("error", () => reject(request.error));
+        request.addEventListener("success", () => resolve(withTag(request.result)));
     });
 }
-var ResolvingKind;
-(function (ResolvingKind) {
-    ResolvingKind[ResolvingKind["Request"] = 0] = "Request";
-    ResolvingKind[ResolvingKind["Cursor"] = 1] = "Cursor";
-})(ResolvingKind || (ResolvingKind = {}));
-function enterTransactionScope(database, storeName, mode, scope, signal) {
+function enterTransactionScope(database, { mode, signal, }, scope, ...storeNames) {
     return new Promise((resolve, reject) => {
-        if (signal.aborted) {
+        if (signal?.aborted) {
             reject(standard_extensions_newAbortError());
             return;
         }
         let hasResult = false;
         let result;
-        const transaction = database.transaction(storeName, mode);
-        const onAbort = () => transaction.abort();
-        transaction.oncomplete = () => {
-            signal.removeEventListener("abort", onAbort);
+        const transaction = database.transaction(storeNames, mode);
+        const onAbort = signal ? () => transaction.abort() : standard_extensions_ignore;
+        transaction.addEventListener("complete", () => {
+            signal?.removeEventListener("abort", onAbort);
             hasResult ? resolve(result) : reject(new Error(`internal error`));
-        };
-        transaction.onerror = function (e) {
-            signal.removeEventListener("abort", onAbort);
+        });
+        transaction.addEventListener("error", (e) => {
+            signal?.removeEventListener("abort", onAbort);
             reject(e.target.error);
-        };
-        signal.addEventListener("abort", onAbort);
-        const store = withTag(transaction.objectStore(storeName));
-        const iterator = scope(store);
-        let resolvingKind;
-        let resolvingRequest;
-        let resolvingCursorRequest;
-        let resolvingCursorAction;
+        });
+        signal?.addEventListener("abort", onAbort);
+        const stores = {};
+        for (const name of storeNames) {
+            stores[name] = withTag(transaction.objectStore(name));
+        }
+        const iterator = scope(stores);
+        let StateKind;
+        (function (StateKind) {
+            StateKind[StateKind["Request"] = 0] = "Request";
+            StateKind[StateKind["OpenCursor"] = 1] = "OpenCursor";
+        })(StateKind || (StateKind = {}));
+        let stateKind;
+        let request_request;
+        let openCursor_request;
+        let openCursor_action;
         function onResolved() {
             let r;
-            switch (resolvingKind) {
+            switch (stateKind) {
                 case undefined:
                     r = iterator.next();
                     break;
-                case ResolvingKind.Request: {
+                case StateKind.Request: {
                     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-                    const result = resolvingRequest.result;
-                    resolvingKind = undefined;
-                    resolvingRequest = undefined;
+                    const result = request_request.result;
+                    stateKind = undefined;
+                    request_request = undefined;
                     r = iterator.next(result);
                     break;
                 }
-                case ResolvingKind.Cursor: {
+                case StateKind.OpenCursor: {
                     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-                    const cursor = resolvingCursorRequest.result;
+                    const cursor = openCursor_request.result;
                     if (cursor === null ||
                         // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-                        resolvingCursorAction(cursor.value) === "return") {
-                        resolvingKind = undefined;
-                        resolvingCursorRequest = undefined;
-                        resolvingCursorAction = undefined;
+                        openCursor_action(cursor.value) === "return") {
+                        stateKind = undefined;
+                        openCursor_request = undefined;
+                        openCursor_action = undefined;
                         r = iterator.next(undefined);
                     }
                     else {
@@ -412,7 +425,7 @@ function enterTransactionScope(database, storeName, mode, scope, signal) {
                     break;
                 }
                 default: {
-                    reject(new Error(`Invalid resolving kind: ${resolvingKind}`));
+                    reject(new Error(`Invalid resolving kind: ${stateKind}`));
                     return;
                 }
             }
@@ -423,15 +436,15 @@ function enterTransactionScope(database, storeName, mode, scope, signal) {
             }
             const yieldValue = r.value;
             if (yieldValue instanceof IDBRequest) {
-                resolvingKind = ResolvingKind.Request;
-                resolvingRequest = yieldValue;
+                stateKind = StateKind.Request;
+                request_request = yieldValue;
                 yieldValue.onsuccess = onResolved;
                 return;
             }
-            resolvingKind = ResolvingKind.Cursor;
-            resolvingCursorRequest = yieldValue.store.openCursor(yieldValue.query);
-            resolvingCursorAction = yieldValue.action;
-            resolvingCursorRequest.onsuccess = onResolved;
+            stateKind = StateKind.OpenCursor;
+            openCursor_request = yieldValue.source.openCursor(yieldValue.query);
+            openCursor_action = yieldValue.action;
+            openCursor_request.onsuccess = onResolved;
         }
         onResolved();
     });
@@ -439,61 +452,302 @@ function enterTransactionScope(database, storeName, mode, scope, signal) {
 function getIndex(store, indexName) {
     return withTag(store.index(indexName));
 }
-function* getValueOfIndex(index, key) {
-    return (yield index.get(key));
+function* getValue(store, query) {
+    return (yield store.get(query));
+}
+function* getValueOfIndex(index, query) {
+    return (yield index.get(query));
 }
 function* putValue(store, value) {
     yield store.put(value);
     return value;
 }
-function* iterateValues(store, action) {
-    yield { store, query: null, action };
+function* deleteValue(store, query) {
+    yield store.delete(query);
+}
+function* iterateValues(store, query, action) {
+    yield { source: store, query, action };
     return;
+}
+function* iterateValuesOfIndex(index, query, action) {
+    yield { source: index, query, action };
+    return;
+}
+function createBound(lower, upper, lowerOpen, upperOpen) {
+    return IDBKeyRange.bound(lower, upper, lowerOpen, upperOpen);
+}
+function createUpperBound(upper, open) {
+    return IDBKeyRange.upperBound(upper, open);
+}
+function createLowerBound(lower, open) {
+    return IDBKeyRange.lowerBound(lower, open);
+}
+
+;// CONCATENATED MODULE: ./source/typed-s2cell.ts
+function createCellFromCoordinates(latLng, level) {
+    return S2.S2Cell.FromLatLng(latLng, level);
+}
+function getCellId(latLng, level) {
+    return createCellFromCoordinates(latLng, level).toString();
 }
 
 ;// CONCATENATED MODULE: ./source/portal-records.ts
+// spell-checker: ignore Lngs
 
-function upgradeDatabase(database) {
-    const portals = database.createObjectStore("portals", {
-        keyPath: "guid",
-        autoIncrement: false,
-    });
-    portals.createIndex("coordinates", ["lat", "lng"]);
-}
-function createPortalStore(portals) {
-    const portalsCoordinatesIndex = getIndex(portals, "coordinates");
-    return {
-        getValueOfCoordinates(lat, lng) {
-            return getValueOfIndex(portalsCoordinatesIndex, [lat, lng]);
+
+
+const databaseSchema = {
+    portals: {
+        recordType: (id),
+        key: "guid",
+        indexes: {
+            coordinates: {
+                key: ["lat", "lng"],
+            },
+            cell17Id: { key: "cell17Id" },
+            cell14Id: { key: "cell14Id" },
         },
-        setValue(value) {
+    },
+    cell14s: {
+        recordType: (id),
+        key: "cellId",
+        indexes: {},
+    },
+};
+function createPortalStore({ portals, cell14s, }) {
+    const coordinatesIndex = getIndex(portals, "coordinates");
+    const cell14IdIndex = getIndex(portals, "cell14Id");
+    const cell17IdIndex = getIndex(portals, "cell17Id");
+    return {
+        getPortalOfGuid(guid) {
+            return getValue(portals, guid);
+        },
+        getPortalOfCoordinates(lat, lng) {
+            return getValueOfIndex(coordinatesIndex, [lat, lng]);
+        },
+        setPortal(value) {
             return putValue(portals, value);
         },
-        iterateValues(action) {
-            return iterateValues(portals, action);
+        removePortal(guid) {
+            return deleteValue(portals, guid);
+        },
+        iteratePortals(action) {
+            return iterateValues(portals, null, action);
+        },
+        iteratePortalsInCell14(cell14Id, action) {
+            return iterateValuesOfIndex(cell14IdIndex, cell14Id, action);
+        },
+        iteratePortalsInCell17(cell17Id, action) {
+            return iterateValuesOfIndex(cell17IdIndex, cell17Id, action);
+        },
+        getCell14(cell14Id) {
+            return getValue(cell14s, cell14Id);
+        },
+        setCell14(cell) {
+            return putValue(cell14s, cell);
+        },
+        iterateCell14s(action) {
+            return iterateValues(cell14s, null, action);
         },
     };
 }
 const databaseName = "portal-records-da2ed70d-f28d-491e-bdbe-eb1726fc5e75";
 const databaseVersion = 1;
 async function openRecords() {
-    const database = await openDatabase(databaseName, databaseVersion, upgradeDatabase);
+    const database = await openDatabase(databaseName, databaseVersion, databaseSchema);
     return {
-        enterTransactionScope(scope, signal) {
-            return enterTransactionScope(database, "portals", "readwrite", (portals) => scope(createPortalStore(portals)), signal);
+        enterTransactionScope(options, scope) {
+            return enterTransactionScope(database, { mode: "readwrite", signal: options?.signal }, (stores) => scope(createPortalStore(stores)), "portals", "cell14s");
+        },
+    };
+}
+function isSponsoredPortal({ name }) {
+    return /ローソン|Lawson|ソフトバンク|Softbank|ワイモバイル|Y!mobile/.test(name);
+}
+function setEntry(map, key, value) {
+    map.set(key, value);
+    return value;
+}
+function boundsIncludesCell(cell, bounds) {
+    for (const corner of cell.getCornerLatLngs()) {
+        if (!bounds.contains(corner))
+            return false;
+    }
+    return true;
+}
+/** 指定された領域に近いセルを返す */
+function getNearlyCellsForBounds(bounds, level) {
+    const result = [];
+    const seenCellIds = new Set();
+    const remainingCells = [
+        createCellFromCoordinates(bounds.getCenter(), level),
+    ];
+    for (let cell; (cell = remainingCells.pop());) {
+        const id = cell.toString();
+        if (seenCellIds.has(id))
+            continue;
+        seenCellIds.add(id);
+        const corners = cell.getCornerLatLngs();
+        if (!bounds.intersects(L.latLngBounds(corners)))
+            continue;
+        result.push(cell);
+        remainingCells.push(...cell.getNeighbors());
+    }
+    return result;
+}
+/** データベース中からセル14中のポータルを返す */
+function* getPortalsInCell14s(store, cell14s) {
+    const portals = [];
+    for (const cell14 of cell14s) {
+        yield* store.iteratePortalsInCell14(cell14.toString(), (portal) => {
+            portals.push(portal);
+            return "continue";
+        });
+    }
+    return portals;
+}
+async function updateRecordsOfCurrentPortals(records, portals, fetchBounds, fetchDate, signal) {
+    const cell14s = getNearlyCellsForBounds(fetchBounds, 14);
+    await records.enterTransactionScope({ signal }, function* (portalsStore) {
+        // 領域内の古いポータルを削除
+        for (const portal of yield* getPortalsInCell14s(portalsStore, cell14s)) {
+            const coordinates = L.latLng(portal.lat, portal.lng);
+            if (!fetchBounds.contains(coordinates))
+                continue;
+            yield* portalsStore.removePortal(portal.guid);
+        }
+        // ポータルを追加
+        for (const [guid, p] of Object.entries(portals)) {
+            const latLng = p.getLatLng();
+            const name = p.options.data.title ?? "";
+            const portal = (yield* portalsStore.getPortalOfGuid(guid)) ?? {
+                guid,
+                lat: latLng.lat,
+                lng: latLng.lng,
+                name,
+                data: p.options.data,
+                cell14Id: getCellId(latLng, 14),
+                cell17Id: getCellId(latLng, 17),
+                lastFetchDate: fetchDate,
+            };
+            yield* portalsStore.setPortal({
+                ...portal,
+                name: name !== "" ? name : portal.name,
+                lat: latLng.lat,
+                lng: latLng.lng,
+                data: p.options.data,
+                cell14Id: getCellId(latLng, 14),
+                cell17Id: getCellId(latLng, 17),
+            });
+        }
+        // 全面が取得されたセル14を更新
+        for (const cell14 of cell14s) {
+            if (!boundsIncludesCell(cell14, fetchBounds))
+                continue;
+            const coordinates = cell14.getLatLng();
+            yield* portalsStore.setCell14({
+                cellId: cell14.toString(),
+                centerLat: coordinates.lat,
+                centerLng: coordinates.lng,
+                lastFetchDate: fetchDate,
+            });
+        }
+    });
+}
+async function getVisibleCells(records, bounds, signal) {
+    const cells = new Map();
+    return await records.enterTransactionScope({ signal }, function* (store) {
+        const visibleCells = new Map();
+        const nearlyCell14s = getNearlyCellsForBounds(bounds, 14);
+        for (const portal of yield* getPortalsInCell14s(store, nearlyCell14s)) {
+            if (isSponsoredPortal(portal))
+                continue;
+            const latLng = L.latLng(portal.lat, portal.lng);
+            const cell = createCellFromCoordinates(latLng, 14);
+            const key = cell.toString();
+            const cell14 = cells.get(key) ??
+                setEntry(cells, key, {
+                    portals: new Map(),
+                    cell,
+                    corner: cell.getCornerLatLngs(),
+                    cell17s: new Map(),
+                });
+            const coordinateKey = latLng.toString();
+            if (cell14.portals.get(coordinateKey) == null) {
+                cell14.portals.set(coordinateKey, portal);
+                const cell17 = createCellFromCoordinates(latLng, 17);
+                const cell17Key = cell17.toString();
+                const cell17Cell = cell14.cell17s.get(cell17Key) ??
+                    setEntry(cell14.cell17s, cell17Key, {
+                        cell: cell17,
+                        count: 0,
+                    });
+                cell17Cell.count++;
+            }
+            if (bounds.contains(latLng) && visibleCells.get(key) == null) {
+                visibleCells.set(key, cell14);
+            }
+        }
+        return visibleCells.values();
+    });
+}
+
+;// CONCATENATED MODULE: ./source/styles.module.css
+const cssText = ".icon-b63a396c7289257dc14f8485997fe2cb93bbb0e7, .obsolete-icon-1fac5d9c5f3f3145ff1fa0084c815fc022e2845b {\r\n    color: #FFFFBB;\r\n    font-size: 20px;\r\n    line-height: 21px;\r\n    text-align: center;\r\n    padding-top: 0.5em;\r\n    overflow: hidden;\r\n    text-shadow: 1px 1px #000, 1px -1px #000, -1px 1px #000, -1px -1px #000, 0 0 5px #000;\r\n    pointer-events: none;\r\n}\r\n.obsolete-icon-1fac5d9c5f3f3145ff1fa0084c815fc022e2845b {\r\n    filter: blur(1px);\r\n    opacity: 0.8;\r\n}\r\n";
+const variables = {};
+/* harmony default export */ const styles_module = ({
+    icon: "icon-b63a396c7289257dc14f8485997fe2cb93bbb0e7",
+    "obsolete-icon": "obsolete-icon-1fac5d9c5f3f3145ff1fa0084c815fc022e2845b",
+});
+
+;// CONCATENATED MODULE: ./source/public-api.ts
+
+function createPublicApi(records) {
+    return {
+        getS2Cell14(lat, lng, options) {
+            return records.enterTransactionScope(options, function* (records) {
+                const cellId = getCellId(L.latLng(lat, lng), 14);
+                const cell = yield* records.getCell14(cellId);
+                const portals = new Map();
+                yield* records.iteratePortalsInCell14(cellId, (portal) => {
+                    portals.set(portal.guid, portal);
+                    return "continue";
+                });
+                return {
+                    cell,
+                    portals,
+                };
+            });
+        },
+        iterateAllPortals(action, options) {
+            return records.enterTransactionScope(options, (portals) => portals.iteratePortals(action));
+        },
+        iterateAllS2Cell14(action, options) {
+            return records.enterTransactionScope(options, (portals) => portals.iterateCell14s(action));
         },
     };
 }
 
-;// CONCATENATED MODULE: ./source/styles.module.css
-const cssText = ".icon-f8066d88118224baa3194f453adad477809ef800 {\r\n    color: #FFFFBB;\r\n    font-size: 20px;\r\n    line-height: 21px;\r\n    text-align: center;\r\n    padding-top: 0.5em;\r\n    overflow: hidden;\r\n    text-shadow: 1px 1px #000, 1px -1px #000, -1px 1px #000, -1px -1px #000, 0 0 5px #000;\r\n    pointer-events: none;\r\n}\r\n";
-const variables = {};
-/* harmony default export */ const styles_module = ({
-    icon: "icon-f8066d88118224baa3194f453adad477809ef800",
-});
+;// CONCATENATED MODULE: ./source/promise-source.ts
+class PromiseSource {
+    constructor() {
+        this.promise = new Promise((resolve, reject) => {
+            this._resolve = resolve;
+            this._reject = reject;
+        });
+    }
+    setResult(value) {
+        this._resolve(value);
+    }
+    setError(value) {
+        this._reject(value);
+    }
+}
 
 ;// CONCATENATED MODULE: ./source/iitc-plugin-portal-records.tsx
-// spell-checker: ignore layeradd Lngs
+// spell-checker: ignore layeradd Lngs moveend
+
+
 
 
 
@@ -511,10 +765,6 @@ function reportError(error) {
 function handleAsyncError(promise) {
     promise.catch(reportError);
 }
-function setEntry(map, key, value) {
-    map.set(key, value);
-    return value;
-}
 function waitUntilLayerAdded(map, predicate) {
     let hasLayer = false;
     map.eachLayer((l) => hasLayer || (hasLayer = predicate(l)));
@@ -530,9 +780,6 @@ function waitUntilLayerAdded(map, predicate) {
         };
         map.on("layeradd", onLayerAdd);
     });
-}
-function isSponsoredPortal({ name }) {
-    return /ローソン|Lawson|ソフトバンク|Softbank|ワイモバイル|Y!mobile/.test(name);
 }
 function createOptions() {
     const blue = {
@@ -583,86 +830,34 @@ function createOptions() {
         },
     };
 }
-async function getVisibleCells(records, cells, bounds, signal) {
-    return await records.enterTransactionScope(function* (portals) {
-        const visibleCells = new Map();
-        yield* portals.iterateValues((portal) => {
-            if (isSponsoredPortal(portal))
-                return "continue";
-            const latLng = L.latLng(portal.lat, portal.lng);
-            const cell = S2.S2Cell.FromLatLng(latLng, 14);
-            const key = cell.toString();
-            const cell14 = cells.get(key) ??
-                setEntry(cells, key, {
-                    portals: new Map(),
-                    cell,
-                    corner: cell.getCornerLatLngs(),
-                    cell17s: new Map(),
-                });
-            const coordinateKey = latLng.toString();
-            if (cell14.portals.get(coordinateKey) == null) {
-                cell14.portals.set(coordinateKey, portal);
-                const cell17 = S2.S2Cell.FromLatLng(latLng, 17);
-                const cell17Key = cell17.toString();
-                const cell17Cell = cell14.cell17s.get(cell17Key) ??
-                    setEntry(cell14.cell17s, cell17Key, {
-                        cell: cell17,
-                        count: 0,
-                    });
-                cell17Cell.count++;
-            }
-            if (bounds.contains(latLng) && visibleCells.get(key) == null) {
-                visibleCells.set(key, cell14);
-            }
-        });
-        return visibleCells;
-    }, signal);
-}
-async function updateRecordsOfCurrentPortals(records, portals, signal) {
-    await records.enterTransactionScope(function* (portalsStore) {
-        for (const [guid, p] of Object.entries(portals)) {
-            const name = p.options.data.title ?? "";
-            const latLng = p.getLatLng();
-            const cachedPortal = (yield* portalsStore.getValueOfCoordinates(latLng.lat, latLng.lng)) ??
-                (yield* portalsStore.setValue({
-                    lat: latLng.lat,
-                    lng: latLng.lng,
-                    name,
-                    guid,
-                    data: p.options.data,
-                }));
-            if (cachedPortal.name == "") {
-                yield* portalsStore.setValue({ ...cachedPortal, name });
-            }
-            yield* portalsStore.setValue({ ...cachedPortal, guid });
-        }
-    }, signal);
-}
-function updateS2CellLayers(s2CellLayer, visibleCells, cellOptions) {
-    s2CellLayer.clearLayers();
-    for (const { corner, cell17s, portals } of visibleCells.values()) {
+function updateS2CellLayers(layer, visibleCells, isRefreshEnd, cellOptions) {
+    const isLatest = isRefreshEnd && 14 < map.getZoom();
+    layer.clearLayers();
+    for (const { corner, cell17s, portals } of visibleCells) {
         const options = cellOptions.cell17CountToOptions.get(cell17s.size) ??
             cellOptions.cell17NonZeroOptions;
         const polygon = L.polygon(corner, options);
-        s2CellLayer.addLayer(polygon);
-        if (map.getZoom() > 13) {
+        layer.addLayer(polygon);
+        if (13 < map.getZoom()) {
             const center = polygon.getBounds().getCenter();
             const label = L.marker(center, {
                 clickable: true,
                 icon: L.divIcon({
-                    className: styles_module["icon"],
+                    className: isLatest
+                        ? styles_module["icon"]
+                        : styles_module["obsolete-icon"],
                     iconSize: [50, 50],
                     html: cell17s.size + "/" + portals.size,
                 }),
             });
-            s2CellLayer.addLayer(label);
+            layer.addLayer(label);
         }
-        if (map.getZoom() > 14) {
+        if (14 < map.getZoom()) {
             for (const cell17 of cell17s.values()) {
                 const polygon17 = L.polygon(cell17.cell.getCornerLatLngs(), cell17.count > 1
                     ? cellOptions.cell17DuplicatedOptions
                     : cellOptions.cell17Options);
-                s2CellLayer.addLayer(polygon17);
+                layer.addLayer(polygon17);
             }
         }
     }
@@ -673,6 +868,9 @@ function main() {
 async function asyncMain() {
     const window = (isIITCMobile ? globalThis : unsafeWindow);
     const { L = standard_extensions_error `leaflet を先に読み込んでください`, map = standard_extensions_error `デフォルトマップがありません`, document, $ = standard_extensions_error `JQuery を先に読み込んでください`, } = window;
+    const publicApiSource = new PromiseSource();
+    window["portal_records_cef3ad7e_0804_420c_8c44_ef4e08dbcdc2"] =
+        publicApiSource.promise;
     await waitElementLoaded();
     // TODO:
     if (!isIITCMobile) {
@@ -693,18 +891,25 @@ async function asyncMain() {
     addStyle(cssText);
     const records = await openRecords();
     const cellOptions = createOptions();
-    const cells = new Map();
-    async function updateLayersAsync(signal) {
-        await updateRecordsOfCurrentPortals(records, iitc.portals, signal);
-        const visibleCells = await getVisibleCells(records, cells, map.getBounds(), signal);
-        updateS2CellLayers(s2CellLayer, visibleCells, cellOptions);
+    async function updateLayersAsync(isRefreshEnd, signal) {
+        if (map.getZoom() <= 13) {
+            s2CellLayer.clearLayers();
+            return;
+        }
+        if (isRefreshEnd && 14 < map.getZoom()) {
+            await updateRecordsOfCurrentPortals(records, iitc.portals, map.getBounds(), Date.now(), signal);
+        }
+        const visibleCells = await getVisibleCells(records, map.getBounds(), signal);
+        updateS2CellLayers(s2CellLayer, visibleCells, isRefreshEnd, cellOptions);
     }
     const updateRecordsAsyncCancelScope = createAsyncCancelScope(handleAsyncError);
-    function updateLayers() {
-        updateRecordsAsyncCancelScope(updateLayersAsync);
+    function updateLayers(isRefreshEnd) {
+        updateRecordsAsyncCancelScope((signal) => updateLayersAsync(isRefreshEnd, signal));
     }
-    iitc.addHook("mapDataRefreshStart", updateLayers);
-    iitc.addHook("mapDataRefreshEnd", updateLayers);
+    updateLayers(false);
+    map.on("moveend", () => updateLayers(false));
+    iitc.addHook("mapDataRefreshEnd", () => updateLayers(true));
+    publicApiSource.setResult(createPublicApi(records));
 }
 
 ;// CONCATENATED MODULE: ./source/iitc-plugin-portal-records.user.ts
