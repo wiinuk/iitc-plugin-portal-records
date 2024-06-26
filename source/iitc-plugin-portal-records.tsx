@@ -176,11 +176,7 @@ async function asyncMain() {
     };
 
     const s2CellLayer = L.layerGroup();
-    iitc.addLayerGroup(
-        "PortalRecords: Level 14 & 17 Statistics",
-        s2CellLayer,
-        true
-    );
+    iitc.addLayerGroup("S2Cell Records", s2CellLayer, true);
     // レイヤーが無効なら何もしない
     await waitUntilLayerAdded(map, (l) => l === s2CellLayer);
 
