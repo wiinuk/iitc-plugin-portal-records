@@ -3,10 +3,10 @@
 // @name         IITC plugin: Portal Records
 // @category     Controls
 // @namespace    https://github.com/IITC-CE/ingress-intel-total-conversion
-// @downloadURL  https://github.com/wiinuk/iitc-plugin-portal-records/raw/master/iitc-plugin-portal-records.user.js
-// @updateURL    https://github.com/wiinuk/iitc-plugin-portal-records/raw/master/iitc-plugin-portal-records.user.js
+// @downloadURL  https://github.com/wiinuk/iitc-plugin-portal-records/raw/main/iitc-plugin-portal-records.user.js
+// @updateURL    https://github.com/wiinuk/iitc-plugin-portal-records/raw/main/iitc-plugin-portal-records.user.js
 // @homepageURL  https://github.com/wiinuk/iitc-plugin-portal-records
-// @version      0.2.0
+// @version      0.2.1
 // @description  IITC plugin to assist in Pokémon GO route creation.
 // @author       Wiinuk
 // @include      https://*.ingress.com/intel*
@@ -18,7 +18,7 @@
 // @match        https://*.ingress.com/mission/*
 // @match        http://*.ingress.com/mission/*
 // @icon         https://www.google.com/s2/favicons?domain=iitc.me
-// @require      https://raw.githubusercontent.com/hunterjm/s2-geometry.js/master/src/s2geometry.js
+// @require      https://raw.githubusercontent.com/hunterjm/s2-geometry.js/main/src/s2geometry.js
 // @grant        GM_info
 // ==/UserScript==
 
@@ -885,7 +885,7 @@ async function asyncMain() {
         addHook: window.addHook,
     };
     const s2CellLayer = L.layerGroup();
-    iitc.addLayerGroup("PortalRecords: Level 14 & 17 Statistics", s2CellLayer, true);
+    iitc.addLayerGroup("S2Cell Records", s2CellLayer, true);
     // レイヤーが無効なら何もしない
     await waitUntilLayerAdded(map, (l) => l === s2CellLayer);
     addStyle(cssText);
