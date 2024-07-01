@@ -6,7 +6,7 @@
 // @downloadURL  https://github.com/wiinuk/iitc-plugin-portal-records/raw/main/iitc-plugin-portal-records.user.js
 // @updateURL    https://github.com/wiinuk/iitc-plugin-portal-records/raw/main/iitc-plugin-portal-records.user.js
 // @homepageURL  https://github.com/wiinuk/iitc-plugin-portal-records
-// @version      0.2.2
+// @version      0.2.3
 // @description  IITC plugin to assist in Pokémon GO route creation.
 // @author       Wiinuk
 // @include      https://*.ingress.com/intel*
@@ -407,7 +407,7 @@ function enterTransactionScope(database, { mode, signal, }, scope, ...storeNames
                     const cursor = openCursor_request.result;
                     if (cursor === null ||
                         // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-                        openCursor_action(cursor.value) === "return") {
+                        openCursor_action(cursor.value) === "break") {
                         stateKind = undefined;
                         openCursor_request = undefined;
                         openCursor_action = undefined;
