@@ -7,7 +7,7 @@ import {
     type Cell14Id,
     type Cell17Id,
     type CellId,
-    type S2Cell,
+    type Cell,
 } from "./typed-s2cell";
 
 /** ローカルマシンから取得した時間 */
@@ -138,7 +138,7 @@ function setEntry<K, V>(map: Map<K, V>, key: K, value: V): V {
     return value;
 }
 function boundsIncludesCell<TLevel extends number>(
-    cell: S2Cell<TLevel>,
+    cell: Cell<TLevel>,
     bounds: L.LatLngBounds
 ) {
     for (const corner of cell.getCornerLatLngs()) {
@@ -152,7 +152,7 @@ function getNearlyCellsForBounds<TLevel extends number>(
     bounds: L.LatLngBounds,
     level: TLevel
 ) {
-    const result: S2Cell<TLevel>[] = [];
+    const result: Cell<TLevel>[] = [];
     const seenCellIds = new Set<CellId<TLevel>>();
     const remainingCells = [
         createCellFromCoordinates(bounds.getCenter(), level),
@@ -173,7 +173,7 @@ function getNearlyCellsForBounds<TLevel extends number>(
 /** データベース中からセル14中のポータルを返す */
 function* getPortalsInCell14s(
     store: PortalsStore,
-    cell14s: readonly S2Cell<14>[]
+    cell14s: readonly Cell<14>[]
 ) {
     const portals: PortalRecord[] = [];
     for (const cell14 of cell14s) {
@@ -246,13 +246,13 @@ export async function updateRecordsOfCurrentPortals(
 }
 
 interface Cell17 {
-    readonly cell: S2Cell<17>;
+    readonly cell: Cell<17>;
     count: number;
 }
 export interface Cell14 {
     readonly cell17s: Map<Cell17Id, Cell17>;
     readonly corner: [S2LatLng, S2LatLng, S2LatLng, S2LatLng];
-    readonly cell: S2Cell<14>;
+    readonly cell: Cell<14>;
     readonly portals: Map<string, PortalRecord>;
 }
 export async function getVisibleCells(

@@ -10,7 +10,7 @@ function withTag<E, M>(value: E) {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type UnwrapId<TId extends Id<any>> = TId extends Id<infer T> ? T : never;
 export interface IndexSchemaKind {
-    readonly key: string | string[];
+    readonly key: string | readonly string[];
     readonly unique?: boolean;
     readonly multiEntry?: boolean;
 }
@@ -18,7 +18,7 @@ export interface StoreSchemaKind {
     /** record type */
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     readonly recordType: Id<any>;
-    readonly key: string | string[];
+    readonly key: string | readonly string[];
     /** index name to key paths */
     readonly indexes: Readonly<Record<string, IndexSchemaKind>>;
 }
@@ -64,7 +64,7 @@ export function openDatabase<TSchema extends DatabaseSchemaKind>(
     });
 }
 
-export type IterationFlow = "continue" | "return" | undefined;
+export type IterationFlow = "continue" | "break" | undefined;
 export interface IterateValuesRequest {
     readonly source: IDBObjectStore | IDBIndex;
     readonly query: IDBValidKey | IDBKeyRange | null | undefined;
@@ -170,7 +170,7 @@ export function enterTransactionScope<
                     if (
                         cursor === null ||
                         // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-                        openCursor_action!(cursor.value) === "return"
+                        openCursor_action!(cursor.value) === "break"
                     ) {
                         stateKind = undefined;
                         openCursor_request = undefined;
@@ -235,7 +235,10 @@ type resolveRecordKeyArray<
     propertyNames extends readonly string[],
     recordType
 > = {
-    [i in keyof propertyNames]: resolveRecordKey<propertyNames[i], recordType>;
+    -readonly [i in keyof propertyNames]: resolveRecordKey<
+        propertyNames[i],
+        recordType
+    >;
 };
 type resolveRecordKeyType<
     keys extends string | readonly string[],

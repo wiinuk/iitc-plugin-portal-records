@@ -2,7 +2,25 @@ import type { CellRecord, PortalRecord, PortalRecords } from "./portal-records";
 import type { IterationFlow } from "./typed-idb";
 import { getCellId } from "./typed-s2cell";
 
-export function createPublicApi(records: PortalRecords) {
+export interface PublicApi {
+    getS2Cell14(
+        lat: number,
+        lng: number,
+        options?: { readonly signal?: AbortSignal }
+    ): Promise<{
+        cell: CellRecord<14> | undefined;
+        portals: Map<string, PortalRecord>;
+    }>;
+    iterateAllPortals(
+        action: (portal: PortalRecord) => IterationFlow,
+        options?: { readonly signal?: AbortSignal }
+    ): Promise<void>;
+    iterateAllS2Cell14(
+        action: (cell14: CellRecord<14>) => IterationFlow,
+        options?: { readonly signal?: AbortSignal }
+    ): Promise<void>;
+}
+export function createPublicApi(records: PortalRecords): PublicApi {
     return {
         getS2Cell14(
             lat: number,
