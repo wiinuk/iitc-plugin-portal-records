@@ -1,13 +1,13 @@
 // ==UserScript==
 // @id           iitc-plugin-portal-records
 // @name         IITC plugin: Portal Records
-// @category     Controls
+// @category     Layer
 // @namespace    https://github.com/IITC-CE/ingress-intel-total-conversion
 // @downloadURL  https://github.com/wiinuk/iitc-plugin-portal-records/raw/main/iitc-plugin-portal-records.user.js
 // @updateURL    https://github.com/wiinuk/iitc-plugin-portal-records/raw/main/iitc-plugin-portal-records.user.js
 // @homepageURL  https://github.com/wiinuk/iitc-plugin-portal-records
-// @version      0.2.3
-// @description  IITC plugin to assist in Pokémon GO route creation.
+// @version      0.2.4
+// @description  IITC plug-in to record portals and cells.
 // @author       Wiinuk
 // @include      https://*.ingress.com/intel*
 // @include      http://*.ingress.com/intel*
