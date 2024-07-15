@@ -2,7 +2,7 @@
 import { addStyle, waitElementLoaded } from "./document-extensions";
 import { isIITCMobile } from "./environment";
 import {
-    getVisibleCells,
+    getNearlyCell14s,
     openRecords,
     updateRecordsOfCurrentPortals,
     type Cell14,
@@ -201,17 +201,12 @@ async function asyncMain() {
                 signal
             );
         }
-        const visibleCells = await getVisibleCells(
+        const nearlyCells = await getNearlyCell14s(
             records,
             map.getBounds(),
             signal
         );
-        updateS2CellLayers(
-            s2CellLayer,
-            visibleCells,
-            isRefreshEnd,
-            cellOptions
-        );
+        updateS2CellLayers(s2CellLayer, nearlyCells, isRefreshEnd, cellOptions);
     }
 
     const updateRecordsAsyncCancelScope =
