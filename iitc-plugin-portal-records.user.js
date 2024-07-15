@@ -6,7 +6,7 @@
 // @downloadURL  https://github.com/wiinuk/iitc-plugin-portal-records/raw/main/iitc-plugin-portal-records.user.js
 // @updateURL    https://github.com/wiinuk/iitc-plugin-portal-records/raw/main/iitc-plugin-portal-records.user.js
 // @homepageURL  https://github.com/wiinuk/iitc-plugin-portal-records
-// @version      0.2.4
+// @version      0.2.5
 // @description  IITC plug-in to record portals and cells.
 // @author       Wiinuk
 // @include      https://*.ingress.com/intel*
@@ -649,26 +649,25 @@ async function updateRecordsOfCurrentPortals(records, portals, fetchBounds, fetc
         }
     });
 }
-async function getVisibleCells(records, bounds, signal) {
-    const cells = new Map();
+async function getNearlyCell14s(records, bounds, signal) {
     return await records.enterTransactionScope({ signal }, function* (store) {
-        const visibleCells = new Map();
-        const nearlyCell14s = getNearlyCellsForBounds(bounds, 14);
-        for (const portal of yield* getPortalsInCell14s(store, nearlyCell14s)) {
-            if (isSponsoredPortal(portal))
-                continue;
-            const latLng = L.latLng(portal.lat, portal.lng);
-            const cell = createCellFromCoordinates(latLng, 14);
-            const key = cell.toString();
-            const cell14 = cells.get(key) ??
-                setEntry(cells, key, {
-                    portals: new Map(),
+        const result = [];
+        for (const cell of getNearlyCellsForBounds(bounds, 14)) {
+            const cellId = cell.toString();
+            let cell14;
+            yield* store.iteratePortalsInCell14(cellId, (portal) => {
+                if (isSponsoredPortal(portal))
+                    return "continue";
+                cell14 ?? (cell14 = {
                     cell,
+                    portals: new Map(),
                     corner: cell.getCornerLatLngs(),
                     cell17s: new Map(),
                 });
-            const coordinateKey = latLng.toString();
-            if (cell14.portals.get(coordinateKey) == null) {
+                const latLng = L.latLng(portal.lat, portal.lng);
+                const coordinateKey = latLng.toString();
+                if (cell14.portals.get(coordinateKey) != null)
+                    return;
                 cell14.portals.set(coordinateKey, portal);
                 const cell17 = createCellFromCoordinates(latLng, 17);
                 const cell17Key = cell17.toString();
@@ -678,12 +677,11 @@ async function getVisibleCells(records, bounds, signal) {
                         count: 0,
                     });
                 cell17Cell.count++;
-            }
-            if (bounds.contains(latLng) && visibleCells.get(key) == null) {
-                visibleCells.set(key, cell14);
-            }
+            });
+            if (cell14)
+                result.push(cell14);
         }
-        return visibleCells.values();
+        return result;
     });
 }
 
@@ -894,8 +892,8 @@ async function asyncMain() {
         if (isRefreshEnd && 14 < map.getZoom()) {
             await updateRecordsOfCurrentPortals(records, iitc.portals, map.getBounds(), Date.now(), signal);
         }
-        const visibleCells = await getVisibleCells(records, map.getBounds(), signal);
-        updateS2CellLayers(s2CellLayer, visibleCells, isRefreshEnd, cellOptions);
+        const nearlyCells = await getNearlyCell14s(records, map.getBounds(), signal);
+        updateS2CellLayers(s2CellLayer, nearlyCells, isRefreshEnd, cellOptions);
     }
     const updateRecordsAsyncCancelScope = createAsyncCancelScope(handleAsyncError);
     function updateLayers(isRefreshEnd) {
