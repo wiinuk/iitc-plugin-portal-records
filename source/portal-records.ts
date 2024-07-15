@@ -255,32 +255,29 @@ export interface Cell14 {
     readonly cell: Cell<14>;
     readonly portals: Map<string, PortalRecord>;
 }
-export async function getVisibleCells(
+export async function getNearlyCell14s(
     records: PortalRecords,
     bounds: L.LatLngBounds,
     signal: AbortSignal
 ) {
-    const cells = new Map<string, Cell14>();
     return await records.enterTransactionScope({ signal }, function* (store) {
-        const visibleCells = new Map<Cell14Id, Cell14>();
-        const nearlyCell14s = getNearlyCellsForBounds(bounds, 14);
-        for (const portal of yield* getPortalsInCell14s(store, nearlyCell14s)) {
-            if (isSponsoredPortal(portal)) continue;
+        const result: Cell14[] = [];
+        for (const cell of getNearlyCellsForBounds(bounds, 14)) {
+            const cellId = cell.toString();
+            let cell14: Cell14 | undefined;
+            yield* store.iteratePortalsInCell14(cellId, (portal) => {
+                if (isSponsoredPortal(portal)) return "continue";
 
-            const latLng = L.latLng(portal.lat, portal.lng);
-            const cell = createCellFromCoordinates(latLng, 14);
-            const key = cell.toString();
-            const cell14 =
-                cells.get(key) ??
-                setEntry(cells, key, {
-                    portals: new Map<string, PortalRecord>(),
+                cell14 ??= {
                     cell,
+                    portals: new Map(),
                     corner: cell.getCornerLatLngs(),
-                    cell17s: new Map<Cell17Id, Cell17>(),
-                });
+                    cell17s: new Map(),
+                };
+                const latLng = L.latLng(portal.lat, portal.lng);
+                const coordinateKey = latLng.toString();
+                if (cell14.portals.get(coordinateKey) != null) return;
 
-            const coordinateKey = latLng.toString();
-            if (cell14.portals.get(coordinateKey) == null) {
                 cell14.portals.set(coordinateKey, portal);
                 const cell17 = createCellFromCoordinates(latLng, 17);
                 const cell17Key = cell17.toString();
@@ -291,12 +288,9 @@ export async function getVisibleCells(
                         count: 0,
                     });
                 cell17Cell.count++;
-            }
-
-            if (bounds.contains(latLng) && visibleCells.get(key) == null) {
-                visibleCells.set(key, cell14);
-            }
+            });
+            if (cell14) result.push(cell14);
         }
-        return visibleCells.values();
+        return result;
     });
 }
