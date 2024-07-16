@@ -6,7 +6,7 @@
 // @downloadURL  https://github.com/wiinuk/iitc-plugin-portal-records/raw/main/iitc-plugin-portal-records.user.js
 // @updateURL    https://github.com/wiinuk/iitc-plugin-portal-records/raw/main/iitc-plugin-portal-records.user.js
 // @homepageURL  https://github.com/wiinuk/iitc-plugin-portal-records
-// @version      0.2.5
+// @version      0.3.1
 // @description  IITC plug-in to record portals and cells.
 // @author       Wiinuk
 // @include      https://*.ingress.com/intel*
@@ -737,8 +737,88 @@ class PromiseSource {
     }
 }
 
+;// CONCATENATED MODULE: ./images/storage.svg
+const storage_namespaceObject = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"12\" height=\"12\" viewBox=\"0 0 100 100\">\r\n  <ellipse cx=\"50\" cy=\"20\" rx=\"40\" ry=\"15\" fill=\"#CCC\"/>\r\n  <rect x=\"10\" y=\"20\" width=\"80\" height=\"60\" fill=\"#CCC\"/>\r\n  <ellipse cx=\"50\" cy=\"80\" rx=\"40\" ry=\"15\" fill=\"#CCC\"/>\r\n  <path xmlns=\"http://www.w3.org/2000/svg\" d=\"M10 20 Q50 40 90 20\" fill=\"none\" stroke=\"#ffffff\" stroke-width=\"10\"/>\r\n  <path d=\"M10 40 Q50 60 90 40\" fill=\"none\" stroke=\"#ffffff\" stroke-width=\"10\"/>\r\n  <path d=\"M10 60 Q50 80 90 60\" fill=\"none\" stroke=\"#ffffff\" stroke-width=\"10\"/>\r\n</svg>\r\n";
+;// CONCATENATED MODULE: ./source/search.ts
+
+function normalize(word) {
+    return word.normalize("NFKC").toLowerCase();
+}
+function eachAllTextsInPortal(portal, action) {
+    if (action(portal.name) === "break")
+        return;
+    const { team } = portal.data;
+    if (team && action(team) === "break")
+        return;
+}
+let includesInPortal_normalizedWord = "";
+let includesInPortal_result = false;
+function includesInPortal(text) {
+    if (normalize(text).includes(includesInPortal_normalizedWord)) {
+        includesInPortal_result = true;
+        return "break";
+    }
+}
+function includes(normalizedWord, portal) {
+    try {
+        includesInPortal_normalizedWord = normalizedWord;
+        includesInPortal_result = false;
+        eachAllTextsInPortal(portal, includesInPortal);
+        return includesInPortal_result;
+    }
+    finally {
+        includesInPortal_normalizedWord = "";
+    }
+}
+function toThreeLetterTeamName(t) {
+    switch (t) {
+        case "E":
+            return "ENL";
+        case "R":
+            return "RES";
+        case "N":
+        case "M":
+            return "NEU";
+        default:
+            return t;
+    }
+}
+async function appendIitcSearchResult(iitc, query, records, signal) {
+    if (!query.confirmed)
+        return;
+    let storageIconCache;
+    const normalizedWords = query.term.split(/\s+/).map(normalize);
+    const oldResults = query.results.slice();
+    await records.enterTransactionScope({ signal }, function* (portals) {
+        yield* portals.iteratePortals((portal) => {
+            for (const word of normalizedWords) {
+                if (!includes(word, portal))
+                    return undefined;
+            }
+            const position = L.latLng(portal.lat, portal.lng);
+            if (oldResults.find((r) => r.position && r.position.equals(position))) {
+                return;
+            }
+            const team = toThreeLetterTeamName(portal.data.team) ?? "???";
+            const level = portal.data.level ?? "?";
+            const health = portal.data.health ?? "?";
+            const resonatorCount = portal.data.resCount ?? "?";
+            query.addResult({
+                title: portal.name,
+                position,
+                description: `${team}, L${level}, ${health}%, ${resonatorCount} Resonators`,
+                icon: (storageIconCache ?? (storageIconCache = `data:image/svg+xml;base64,` + btoa(storage_namespaceObject))),
+                onSelected(_result, _clickEvent) {
+                    iitc.renderPortalDetails(portal.guid);
+                },
+            });
+        });
+    });
+}
+
 ;// CONCATENATED MODULE: ./source/iitc-plugin-portal-records.tsx
 // spell-checker: ignore layeradd Lngs moveend
+
 
 
 
@@ -862,6 +942,7 @@ async function asyncMain() {
     const window = (isIITCMobile ? globalThis : unsafeWindow);
     const { L = standard_extensions_error `leaflet を先に読み込んでください`, map = standard_extensions_error `デフォルトマップがありません`, document, $ = standard_extensions_error `JQuery を先に読み込んでください`, } = window;
     const publicApiSource = new PromiseSource();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     window["portal_records_cef3ad7e_0804_420c_8c44_ef4e08dbcdc2"] =
         publicApiSource.promise;
     await waitElementLoaded();
@@ -902,6 +983,8 @@ async function asyncMain() {
     updateLayers(false);
     map.on("moveend", () => updateLayers(false));
     iitc.addHook("mapDataRefreshEnd", () => updateLayers(true));
+    const appendSearchResultAsyncCancelScope = createAsyncCancelScope(handleAsyncError);
+    iitc.addHook("search", (query) => appendSearchResultAsyncCancelScope((signal) => appendIitcSearchResult(iitc, query, records, signal)));
     publicApiSource.setResult(createPublicApi(records));
 }
 
