@@ -44,15 +44,34 @@ interface IITCGlobals {
 interface IITCPlugin extends Record<string, unknown> {
     (): void;
 }
-interface IITCSearchResult {
-    description?: string;
-    icon?: string;
-    title?: string;
-    layer?: L.ILayer;
-    bounds?: L.LatLngBounds;
+interface IITCWithPosition {
+    position: L.LatLng;
+    bounds?: undefined;
 }
+interface IITCWithBounds {
+    position?: undefined;
+    bounds: L.LatLngBounds;
+}
+interface IITCAnySearchResult {
+    title: string;
+
+    position?: L.LatLng;
+    bounds?: L.LatLngBounds;
+
+    description?: string;
+    layer?: L.ILayer | null;
+    icon?: string;
+
+    onSelected?(result: IITCSearchResult, event: Event): boolean | void;
+    onRemove?(result: IITCSearchResult): void;
+}
+type IITCSearchResult = IITCAnySearchResult &
+    (IITCWithPosition | IITCWithBounds);
+
 interface IITCSearchQuery {
     readonly term: string;
+    readonly confirmed: boolean;
+    readonly results: readonly IITCSearchResult[];
     addResult(result: IITCSearchResult): unknown;
 }
 type IITCHookEventNameDataMap = {
@@ -121,7 +140,7 @@ interface IITCPortalData {
     ornaments?: string[];
     /** @example `1` */
     resCount?: number;
-    team?: "E" | "R" | "N";
+    team?: "E" | "R" | "N" | "M";
     /** Date.now の戻り値。new Date(timestamp) で日時取得 */
     timestamp?: number;
     /** ポータルのタイトル */

@@ -11,6 +11,7 @@ import { createAsyncCancelScope, error } from "./standard-extensions";
 import classNames, { cssText } from "./styles.module.css";
 import { createPublicApi } from "./public-api";
 import { PromiseSource } from "./promise-source";
+import { appendIitcSearchResult } from "./search";
 
 function reportError(error: unknown) {
     console.error(error);
@@ -156,6 +157,7 @@ async function asyncMain() {
 
     type PublicApi = ReturnType<typeof createPublicApi>;
     const publicApiSource = new PromiseSource<PublicApi>();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (window as any)["portal_records_cef3ad7e_0804_420c_8c44_ef4e08dbcdc2"] =
         publicApiSource.promise;
 
@@ -220,6 +222,14 @@ async function asyncMain() {
     updateLayers(false);
     map.on("moveend", () => updateLayers(false));
     iitc.addHook("mapDataRefreshEnd", () => updateLayers(true));
+
+    const appendSearchResultAsyncCancelScope =
+        createAsyncCancelScope(handleAsyncError);
+    iitc.addHook("search", (query) =>
+        appendSearchResultAsyncCancelScope((signal) =>
+            appendIitcSearchResult(iitc, query, records, signal)
+        )
+    );
 
     publicApiSource.setResult(createPublicApi(records));
 }
