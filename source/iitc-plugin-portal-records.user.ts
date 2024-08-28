@@ -6,7 +6,7 @@
 // @downloadURL  https://github.com/wiinuk/iitc-plugin-portal-records/raw/main/iitc-plugin-portal-records.user.js
 // @updateURL    https://github.com/wiinuk/iitc-plugin-portal-records/raw/main/iitc-plugin-portal-records.user.js
 // @homepageURL  https://github.com/wiinuk/iitc-plugin-portal-records
-// @version      0.3.1
+// @version      0.3.2
 // @description  IITC plug-in to record portals and cells.
 // @author       Wiinuk
 // @include      https://*.ingress.com/intel*
@@ -18,7 +18,7 @@
 // @match        https://*.ingress.com/mission/*
 // @match        http://*.ingress.com/mission/*
 // @icon         https://www.google.com/s2/favicons?domain=iitc.me
-// @require      https://raw.githubusercontent.com/hunterjm/s2-geometry.js/main/src/s2geometry.js
+// @require      https://raw.githubusercontent.com/hunterjm/s2-geometry.js/master/src/s2geometry.js
 // @grant        GM_info
 // ==/UserScript==
 
