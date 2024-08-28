@@ -6,7 +6,7 @@
 // @downloadURL  https://github.com/wiinuk/iitc-plugin-portal-records/raw/main/iitc-plugin-portal-records.user.js
 // @updateURL    https://github.com/wiinuk/iitc-plugin-portal-records/raw/main/iitc-plugin-portal-records.user.js
 // @homepageURL  https://github.com/wiinuk/iitc-plugin-portal-records
-// @version      0.3.3
+// @version      0.3.4
 // @description  IITC plug-in to record portals and cells.
 // @author       Wiinuk
 // @include      https://*.ingress.com/intel*
@@ -565,7 +565,7 @@ function setEntry(map, key, value) {
 }
 function boundsIncludesCell(cell, bounds) {
     for (const corner of cell.getCornerLatLngs()) {
-        if (!bounds.contains(corner))
+        if (!bounds.contains(L.latLng(corner)))
             return false;
     }
     return true;

@@ -142,7 +142,7 @@ function boundsIncludesCell<TLevel extends number>(
     bounds: L.LatLngBounds
 ) {
     for (const corner of cell.getCornerLatLngs()) {
-        if (!bounds.contains(corner)) return false;
+        if (!bounds.contains(L.latLng(corner))) return false;
     }
     return true;
 }
