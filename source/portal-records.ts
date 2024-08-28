@@ -128,7 +128,7 @@ export async function openRecords(): Promise<PortalRecords> {
 }
 
 function isSponsoredPortal({ name }: PortalRecord) {
-    return /ローソン|Lawson|ソフトバンク|Softbank|ワイモバイル|Y!mobile/.test(
+    return /ITO EN|ローソン|Lawson|ソフトバンク|Softbank|ワイモバイル|Y!mobile/.test(
         name
     );
 }

@@ -6,7 +6,7 @@
 // @downloadURL  https://github.com/wiinuk/iitc-plugin-portal-records/raw/main/iitc-plugin-portal-records.user.js
 // @updateURL    https://github.com/wiinuk/iitc-plugin-portal-records/raw/main/iitc-plugin-portal-records.user.js
 // @homepageURL  https://github.com/wiinuk/iitc-plugin-portal-records
-// @version      0.3.2
+// @version      0.3.3
 // @description  IITC plug-in to record portals and cells.
 // @author       Wiinuk
 // @include      https://*.ingress.com/intel*
@@ -557,7 +557,7 @@ async function openRecords() {
     };
 }
 function isSponsoredPortal({ name }) {
-    return /ローソン|Lawson|ソフトバンク|Softbank|ワイモバイル|Y!mobile/.test(name);
+    return /ITO EN|ローソン|Lawson|ソフトバンク|Softbank|ワイモバイル|Y!mobile/.test(name);
 }
 function setEntry(map, key, value) {
     map.set(key, value);
