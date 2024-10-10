@@ -12,6 +12,7 @@ import classNames, { cssText } from "./styles.module.css";
 import { createPublicApi } from "./public-api";
 import { PromiseSource } from "./promise-source";
 import { appendIitcSearchResult } from "./search";
+import { createS2Namespace } from "./s2cell";
 
 function reportError(error: unknown) {
     console.error(error);
@@ -176,6 +177,8 @@ async function asyncMain() {
         renderPortalDetails: window.renderPortalDetails,
         addHook: window.addHook,
     };
+
+    (window as typeof window & { S2?: typeof S2 }).S2 ||= createS2Namespace();
 
     const s2CellLayer = L.layerGroup();
     iitc.addLayerGroup("S2Cell Records", s2CellLayer, true);
