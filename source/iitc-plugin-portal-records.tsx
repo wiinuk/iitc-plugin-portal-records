@@ -180,21 +180,24 @@ async function asyncMain() {
 
     (window as typeof window & { S2?: typeof S2 }).S2 ||= createS2Namespace();
 
-    const s2CellLayer = L.layerGroup();
-    iitc.addLayerGroup("S2Cell Records", s2CellLayer, true);
+    const pgoCellLayer = L.layerGroup();
+    iitc.addLayerGroup("S2Cells ( Pgo )", pgoCellLayer, true);
+
     // レイヤーが無効なら何もしない
-    await waitUntilLayerAdded(map, (l) => l === s2CellLayer);
+    await waitUntilLayerAdded(map, (l) => l === pgoCellLayer);
 
     addStyle(cssText);
     const records = await openRecords();
     const cellOptions = createOptions();
 
-    async function updateLayersAsync(
+    async function updatePgoCellLayer(
         isRefreshEnd: boolean,
         signal: AbortSignal
     ) {
+        if (!map.hasLayer(pgoCellLayer)) return;
+
         if (map.getZoom() <= 13) {
-            s2CellLayer.clearLayers();
+            pgoCellLayer.clearLayers();
             return;
         }
         if (isRefreshEnd && 14 < map.getZoom()) {
@@ -211,7 +214,18 @@ async function asyncMain() {
             map.getBounds(),
             signal
         );
-        updateS2CellLayers(s2CellLayer, nearlyCells, isRefreshEnd, cellOptions);
+        updateS2CellLayers(
+            pgoCellLayer,
+            nearlyCells,
+            isRefreshEnd,
+            cellOptions
+        );
+    }
+    async function updateLayersAsync(
+        isRefreshEnd: boolean,
+        signal: AbortSignal
+    ) {
+        await updatePgoCellLayer(isRefreshEnd, signal);
     }
 
     const updateRecordsAsyncCancelScope =
