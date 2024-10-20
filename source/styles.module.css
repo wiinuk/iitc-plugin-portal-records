@@ -12,3 +12,6 @@
     filter: blur(1px);
     opacity: 0.8;
 }
+path.pmb-cell16, path.pmb-cell16-duplicated {
+    mask: url(#flowerMask);
+}

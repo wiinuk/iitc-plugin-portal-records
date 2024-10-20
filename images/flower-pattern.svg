@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <defs>
+    <!-- 花単体 -->
+    <g id="flower" transform="translate(-25, -25)">
+      <path d="
+        M25 25
+        Q32.5 17.5, 25 10
+        Q17.5 17.5, 25 25
+
+        M25 25
+        Q32.5 32.5, 25 40
+        Q17.5 32.5, 25 25
+
+        M25 25
+        Q17.5 17.5, 10 25
+        Q17.5 32.5, 25 25
+
+        M25 25
+        Q32.5 17.5, 40 25
+        Q32.5 32.5, 25 25"
+        fill="white"/>
+      <circle cx="25" cy="25" r="4" fill="white"/>
+    </g>
+
+    <!-- 1つの花をずらして交互に敷き詰める -->
+    <pattern patternTransform="scale(0.5)" id="flowerPattern" width="29" height="50.115" patternUnits="userSpaceOnUse">
+        <use href="#flower" x="14.5" y="0" />
+        <use href="#flower" x="0" y="25.05" />
+        <use href="#flower" x="29" y="25.05" />
+        <use href="#flower" x="14.5" y="50.115"/>
+    </pattern>
+
+    <mask id="flowerMask">
+        <rect x="-10000" y="-10000" width="20000" height="20000" fill="black"/>
+        <rect x="-10000" y="-10000" width="20000" height="20000" fill="url(#flowerPattern)"/>
+    </mask>
+  </defs>
+
+  <!-- デザイン確認用 -->
+  <path stroke-linejoin="round" stroke-linecap="round" fill-rule="evenodd" pointer-events="none" stroke="green" stroke-opacity="0.1" stroke-width="3" fill="green" fill-opacity="0.5" d="M0 0L200 0L200 200L0 200z" mask="url(#flowerMask)" />
+</svg>

@@ -245,15 +245,43 @@ export async function updateRecordsOfCurrentPortals(
     });
 }
 
-interface Cell17 {
-    readonly cell: Cell<17>;
-    count: number;
-}
-export interface Cell14 {
-    readonly cell17s: Map<Cell17Id, Cell17>;
+type CellStatisticMap<TLevel extends number> = Map<
+    CellId<TLevel>,
+    {
+        readonly cell: Cell<TLevel>;
+        count: number;
+    }
+>;
+export interface Cell14Statistics {
+    readonly cell17s: CellStatisticMap<17>;
+    readonly cell16s: CellStatisticMap<16>;
     readonly corner: [S2LatLng, S2LatLng, S2LatLng, S2LatLng];
     readonly cell: Cell<14>;
     readonly portals: Map<string, PortalRecord>;
+}
+function createEmptyCell14Statistics(cell: Cell<14>): Cell14Statistics {
+    return {
+        cell,
+        portals: new Map(),
+        corner: cell.getCornerLatLngs(),
+        cell17s: new Map(),
+        cell16s: new Map(),
+    };
+}
+function updateCellStatistics<TLevel extends number>(
+    cells: CellStatisticMap<TLevel>,
+    portalLatLng: L.LatLng,
+    level: TLevel
+) {
+    const cell = createCellFromCoordinates(portalLatLng, level);
+    const key = cell.toString();
+    const statistics =
+        cells.get(key) ??
+        setEntry(cells, key, {
+            cell,
+            count: 0,
+        });
+    statistics.count++;
 }
 export async function getNearlyCell14s(
     records: PortalRecords,
@@ -261,33 +289,21 @@ export async function getNearlyCell14s(
     signal: AbortSignal
 ) {
     return await records.enterTransactionScope({ signal }, function* (store) {
-        const result: Cell14[] = [];
+        const result: Cell14Statistics[] = [];
         for (const cell of getNearlyCellsForBounds(bounds, 14)) {
             const cellId = cell.toString();
-            let cell14: Cell14 | undefined;
+            let cell14: Cell14Statistics | undefined;
             yield* store.iteratePortalsInCell14(cellId, (portal) => {
                 if (isSponsoredPortal(portal)) return "continue";
 
-                cell14 ??= {
-                    cell,
-                    portals: new Map(),
-                    corner: cell.getCornerLatLngs(),
-                    cell17s: new Map(),
-                };
+                cell14 ??= createEmptyCell14Statistics(cell);
                 const latLng = L.latLng(portal.lat, portal.lng);
                 const coordinateKey = latLng.toString();
                 if (cell14.portals.get(coordinateKey) != null) return;
 
                 cell14.portals.set(coordinateKey, portal);
-                const cell17 = createCellFromCoordinates(latLng, 17);
-                const cell17Key = cell17.toString();
-                const cell17Cell =
-                    cell14.cell17s.get(cell17Key) ??
-                    setEntry(cell14.cell17s, cell17Key, {
-                        cell: cell17,
-                        count: 0,
-                    });
-                cell17Cell.count++;
+                updateCellStatistics(cell14.cell16s, latLng, 16);
+                updateCellStatistics(cell14.cell17s, latLng, 17);
             });
             if (cell14) result.push(cell14);
         }
