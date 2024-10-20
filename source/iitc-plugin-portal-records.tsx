@@ -5,7 +5,7 @@ import {
     getNearlyCell14s,
     openRecords,
     updateRecordsOfCurrentPortals,
-    type Cell14,
+    type Cell14Statistics,
 } from "./portal-records";
 import { createAsyncCancelScope, error } from "./standard-extensions";
 import classNames, { cssText } from "./styles.module.css";
@@ -13,6 +13,7 @@ import { createPublicApi } from "./public-api";
 import { PromiseSource } from "./promise-source";
 import { appendIitcSearchResult } from "./search";
 import { createS2Namespace } from "./s2cell";
+import flowerPatternSvgText from "../images/flower-pattern.svg";
 
 function reportError(error: unknown) {
     console.error(error);
@@ -56,21 +57,51 @@ function createOptions() {
         opacity: 0.1,
         clickable: false,
         fill: true,
-    };
+    } satisfies L.PolylineOptions;
     const red = {
         color: "red",
         weight: 3,
         opacity: 0.5,
         clickable: false,
         fill: true,
-    };
+    } satisfies L.PolylineOptions;
+    const green = {
+        color: "green",
+        weight: 3,
+        opacity: 0.1,
+        clickable: false,
+        fill: true,
+        fillOpacity: 0.5,
+    } satisfies L.PolylineOptions;
     const yellow = {
         color: "yellow",
         weight: 3,
         opacity: 0.5,
         clickable: false,
         fill: true,
+    } satisfies L.PolylineOptions;
+    const yellowDuplicated = {
+        color: "yellow",
+        weight: 3,
+        opacity: 0.1,
+        clickable: false,
+        fill: true,
+        fillOpacity: 0.5,
+    } satisfies L.PolylineOptions;
+
+    const cell17Options = green;
+    const cell17DuplicatedOptions = yellowDuplicated;
+
+    const cell16Options = {
+        ...cell17Options,
+        fillOpacity: cell17Options.fillOpacity * 0.5,
+    } satisfies L.PolylineOptions;
+
+    const cell16DuplicatedOptions = {
+        ...cell17DuplicatedOptions,
+        fillOpacity: cell17DuplicatedOptions.fillOpacity * 0.5,
     };
+
     return {
         cell17NonZeroOptions: blue,
         cell17CountToOptions: new Map([
@@ -80,27 +111,15 @@ function createOptions() {
             [4, yellow],
             [18, yellow],
         ]),
-        cell17Options: {
-            color: "green",
-            weight: 3,
-            opacity: 0.1,
-            clickable: false,
-            fill: true,
-            fillOpacity: 0.5,
-        },
-        cell17DuplicatedOptions: {
-            color: "yellow",
-            weight: 3,
-            opacity: 0.1,
-            clickable: false,
-            fill: true,
-            fillOpacity: 0.5,
-        },
-    };
+        cell17Options,
+        cell17DuplicatedOptions,
+        cell16Options,
+        cell16DuplicatedOptions,
+    } as const;
 }
-function updateS2CellLayers(
+function updatePgoS2CellLayers(
     layer: L.LayerGroup<L.ILayer>,
-    visibleCells: Iterable<Cell14>,
+    visibleCells: Iterable<Cell14Statistics>,
     isRefreshEnd: boolean,
     cellOptions: ReturnType<typeof createOptions>
 ) {
@@ -140,9 +159,47 @@ function updateS2CellLayers(
         }
     }
 }
+function updatePmbS2CellLayers(
+    layer: L.LayerGroup<L.ILayer>,
+    visibleCells: Iterable<Cell14Statistics>,
+    cellOptions: ReturnType<typeof createOptions>
+) {
+    layer.clearLayers();
+    const cell16Options = {
+        ...cellOptions.cell16Options,
+        className: classNames["pmb-cell16"],
+    };
+    const cell16DuplicatedOptions = {
+        ...cellOptions.cell16DuplicatedOptions,
+        className: classNames["pmb-cell16-duplicated"],
+    };
+
+    for (const { cell16s } of visibleCells) {
+        if (14 < map.getZoom()) {
+            for (const cell16 of cell16s.values()) {
+                const polygon16 = L.polygon(
+                    cell16.cell.getCornerLatLngs(),
+                    cell16.count > 1 ? cell16DuplicatedOptions : cell16Options
+                );
+                layer.addLayer(polygon16);
+            }
+        }
+    }
+}
 
 export function main() {
     handleAsyncError(asyncMain());
+}
+
+function appendAsSvg(svgText: string, options?: { defsOnly: boolean }) {
+    const svg = new DOMParser().parseFromString(svgText, "image/svg+xml")
+        .children[0] as SVGElement;
+    if (options?.defsOnly) {
+        for (const child of svg.children) {
+            if (child.tagName !== "defs") child.remove();
+        }
+    }
+    document.body.appendChild(svg);
 }
 
 async function asyncMain() {
@@ -180,11 +237,18 @@ async function asyncMain() {
 
     (window as typeof window & { S2?: typeof S2 }).S2 ||= createS2Namespace();
 
-    const s2CellLayer = L.layerGroup();
-    iitc.addLayerGroup("S2Cell Records", s2CellLayer, true);
-    // レイヤーが無効なら何もしない
-    await waitUntilLayerAdded(map, (l) => l === s2CellLayer);
+    const pgoCellLayer = L.layerGroup();
+    const pmbCellLayer = L.layerGroup();
+    iitc.addLayerGroup("S2Cells - Pmb", pmbCellLayer, true);
+    iitc.addLayerGroup("S2Cells - Pgo", pgoCellLayer, true);
 
+    // どちらかのレイヤーが有効になるまで待つ
+    await waitUntilLayerAdded(
+        map,
+        (l) => l === pgoCellLayer || l === pmbCellLayer
+    );
+
+    appendAsSvg(flowerPatternSvgText, { defsOnly: true });
     addStyle(cssText);
     const records = await openRecords();
     const cellOptions = createOptions();
@@ -193,10 +257,33 @@ async function asyncMain() {
         isRefreshEnd: boolean,
         signal: AbortSignal
     ) {
+        const enablePgoCellLayer = map.hasLayer(pgoCellLayer);
+        const enablePmbCellLayer = map.hasLayer(pmbCellLayer);
+        if (!enablePgoCellLayer && !enablePmbCellLayer) return;
+
         if (map.getZoom() <= 13) {
-            s2CellLayer.clearLayers();
+            pgoCellLayer.clearLayers();
+            pmbCellLayer.clearLayers();
             return;
         }
+        const nearlyCells = await getNearlyCell14s(
+            records,
+            map.getBounds(),
+            signal
+        );
+        if (enablePgoCellLayer) {
+            updatePgoS2CellLayers(
+                pgoCellLayer,
+                nearlyCells,
+                isRefreshEnd,
+                cellOptions
+            );
+        }
+        if (enablePmbCellLayer) {
+            updatePmbS2CellLayers(pmbCellLayer, nearlyCells, cellOptions);
+        }
+    }
+    async function onMapUpdated(isRefreshEnd: boolean, signal: AbortSignal) {
         if (isRefreshEnd && 14 < map.getZoom()) {
             await updateRecordsOfCurrentPortals(
                 records,
@@ -206,19 +293,14 @@ async function asyncMain() {
                 signal
             );
         }
-        const nearlyCells = await getNearlyCell14s(
-            records,
-            map.getBounds(),
-            signal
-        );
-        updateS2CellLayers(s2CellLayer, nearlyCells, isRefreshEnd, cellOptions);
+        await updateLayersAsync(isRefreshEnd, signal);
     }
 
     const updateRecordsAsyncCancelScope =
         createAsyncCancelScope(handleAsyncError);
     function updateLayers(isRefreshEnd: boolean) {
         updateRecordsAsyncCancelScope((signal) =>
-            updateLayersAsync(isRefreshEnd, signal)
+            onMapUpdated(isRefreshEnd, signal)
         );
     }
 
