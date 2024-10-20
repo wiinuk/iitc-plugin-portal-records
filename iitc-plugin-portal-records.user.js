@@ -6,7 +6,7 @@
 // @downloadURL  https://github.com/wiinuk/iitc-plugin-portal-records/raw/main/iitc-plugin-portal-records.user.js
 // @updateURL    https://github.com/wiinuk/iitc-plugin-portal-records/raw/main/iitc-plugin-portal-records.user.js
 // @homepageURL  https://github.com/wiinuk/iitc-plugin-portal-records
-// @version      0.3.5
+// @version      0.4.0
 // @description  IITC plug-in to record portals and cells.
 // @author       Wiinuk
 // @include      https://*.ingress.com/intel*
@@ -648,6 +648,25 @@ async function updateRecordsOfCurrentPortals(records, portals, fetchBounds, fetc
         }
     });
 }
+function createEmptyCell14Statistics(cell) {
+    return {
+        cell,
+        portals: new Map(),
+        corner: cell.getCornerLatLngs(),
+        cell17s: new Map(),
+        cell16s: new Map(),
+    };
+}
+function updateCellStatistics(cells, portalLatLng, level) {
+    const cell = createCellFromCoordinates(portalLatLng, level);
+    const key = cell.toString();
+    const statistics = cells.get(key) ??
+        setEntry(cells, key, {
+            cell,
+            count: 0,
+        });
+    statistics.count++;
+}
 async function getNearlyCell14s(records, bounds, signal) {
     return await records.enterTransactionScope({ signal }, function* (store) {
         const result = [];
@@ -657,25 +676,14 @@ async function getNearlyCell14s(records, bounds, signal) {
             yield* store.iteratePortalsInCell14(cellId, (portal) => {
                 if (isSponsoredPortal(portal))
                     return "continue";
-                cell14 ?? (cell14 = {
-                    cell,
-                    portals: new Map(),
-                    corner: cell.getCornerLatLngs(),
-                    cell17s: new Map(),
-                });
+                cell14 ?? (cell14 = createEmptyCell14Statistics(cell));
                 const latLng = L.latLng(portal.lat, portal.lng);
                 const coordinateKey = latLng.toString();
                 if (cell14.portals.get(coordinateKey) != null)
                     return;
                 cell14.portals.set(coordinateKey, portal);
-                const cell17 = createCellFromCoordinates(latLng, 17);
-                const cell17Key = cell17.toString();
-                const cell17Cell = cell14.cell17s.get(cell17Key) ??
-                    setEntry(cell14.cell17s, cell17Key, {
-                        cell: cell17,
-                        count: 0,
-                    });
-                cell17Cell.count++;
+                updateCellStatistics(cell14.cell16s, latLng, 16);
+                updateCellStatistics(cell14.cell17s, latLng, 17);
             });
             if (cell14)
                 result.push(cell14);
@@ -685,11 +693,13 @@ async function getNearlyCell14s(records, bounds, signal) {
 }
 
 ;// CONCATENATED MODULE: ./source/styles.module.css
-const cssText = ".icon-b63a396c7289257dc14f8485997fe2cb93bbb0e7, .obsolete-icon-1fac5d9c5f3f3145ff1fa0084c815fc022e2845b {\r\n    color: #FFFFBB;\r\n    font-size: 20px;\r\n    line-height: 21px;\r\n    text-align: center;\r\n    padding-top: 0.5em;\r\n    overflow: hidden;\r\n    text-shadow: 1px 1px #000, 1px -1px #000, -1px 1px #000, -1px -1px #000, 0 0 5px #000;\r\n    pointer-events: none;\r\n}\r\n.obsolete-icon-1fac5d9c5f3f3145ff1fa0084c815fc022e2845b {\r\n    filter: blur(1px);\r\n    opacity: 0.8;\r\n}\r\n";
+const cssText = ".icon-952cd521fc1f21719cc4b25d22c4791b64895f05, .obsolete-icon-343fa6d408ff8ff83dbd69f6f11c07cc6ad71398 {\r\n    color: #FFFFBB;\r\n    font-size: 20px;\r\n    line-height: 21px;\r\n    text-align: center;\r\n    padding-top: 0.5em;\r\n    overflow: hidden;\r\n    text-shadow: 1px 1px #000, 1px -1px #000, -1px 1px #000, -1px -1px #000, 0 0 5px #000;\r\n    pointer-events: none;\r\n}\r\n.obsolete-icon-343fa6d408ff8ff83dbd69f6f11c07cc6ad71398 {\r\n    filter: blur(1px);\r\n    opacity: 0.8;\r\n}\r\npath.pmb-cell16-07ec54169c7de0a3d18ae53bd4585d13a4e94fcc, path.pmb-cell16-duplicated-7652c778541af4485e24d6ec26dcebf2d624cf46 {\r\n    mask: url(#flowerMask);\r\n}\r\n";
 const variables = {};
 /* harmony default export */ const styles_module = ({
-    icon: "icon-b63a396c7289257dc14f8485997fe2cb93bbb0e7",
-    "obsolete-icon": "obsolete-icon-1fac5d9c5f3f3145ff1fa0084c815fc022e2845b",
+    icon: "icon-952cd521fc1f21719cc4b25d22c4791b64895f05",
+    "obsolete-icon": "obsolete-icon-343fa6d408ff8ff83dbd69f6f11c07cc6ad71398",
+    "pmb-cell16": "pmb-cell16-07ec54169c7de0a3d18ae53bd4585d13a4e94fcc",
+    "pmb-cell16-duplicated": "pmb-cell16-duplicated-7652c778541af4485e24d6ec26dcebf2d624cf46",
 });
 
 ;// CONCATENATED MODULE: ./source/public-api.ts
@@ -1124,8 +1134,11 @@ function createS2Namespace() {
     };
 }
 
+;// CONCATENATED MODULE: ./images/flower-pattern.svg
+const flower_pattern_namespaceObject = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 200 200\">\r\n  <defs>\r\n    <!-- 花単体 -->\r\n    <g id=\"flower\" transform=\"translate(-25, -25)\">\r\n      <path d=\"\r\n        M25 25\r\n        Q32.5 17.5, 25 10\r\n        Q17.5 17.5, 25 25\r\n\r\n        M25 25\r\n        Q32.5 32.5, 25 40\r\n        Q17.5 32.5, 25 25\r\n\r\n        M25 25\r\n        Q17.5 17.5, 10 25\r\n        Q17.5 32.5, 25 25\r\n\r\n        M25 25\r\n        Q32.5 17.5, 40 25\r\n        Q32.5 32.5, 25 25\"\r\n        fill=\"white\"/>\r\n      <circle cx=\"25\" cy=\"25\" r=\"4\" fill=\"white\"/>\r\n    </g>\r\n\r\n    <!-- 1つの花をずらして交互に敷き詰める -->\r\n    <pattern patternTransform=\"scale(0.5)\" id=\"flowerPattern\" width=\"29\" height=\"50.115\" patternUnits=\"userSpaceOnUse\">\r\n        <use href=\"#flower\" x=\"14.5\" y=\"0\" />\r\n        <use href=\"#flower\" x=\"0\" y=\"25.05\" />\r\n        <use href=\"#flower\" x=\"29\" y=\"25.05\" />\r\n        <use href=\"#flower\" x=\"14.5\" y=\"50.115\"/>\r\n    </pattern>\r\n\r\n    <mask id=\"flowerMask\">\r\n        <rect x=\"-10000\" y=\"-10000\" width=\"20000\" height=\"20000\" fill=\"black\"/>\r\n        <rect x=\"-10000\" y=\"-10000\" width=\"20000\" height=\"20000\" fill=\"url(#flowerPattern)\"/>\r\n    </mask>\r\n  </defs>\r\n\r\n  <!-- デザイン確認用 -->\r\n  <path stroke-linejoin=\"round\" stroke-linecap=\"round\" fill-rule=\"evenodd\" pointer-events=\"none\" stroke=\"green\" stroke-opacity=\"0.1\" stroke-width=\"3\" fill=\"green\" fill-opacity=\"0.5\" d=\"M0 0L200 0L200 200L0 200z\" mask=\"url(#flowerMask)\" />\r\n</svg>\r\n";
 ;// CONCATENATED MODULE: ./source/iitc-plugin-portal-records.tsx
 // spell-checker: ignore layeradd Lngs moveend
+
 
 
 
@@ -1178,12 +1191,38 @@ function createOptions() {
         clickable: false,
         fill: true,
     };
+    const green = {
+        color: "green",
+        weight: 3,
+        opacity: 0.1,
+        clickable: false,
+        fill: true,
+        fillOpacity: 0.5,
+    };
     const yellow = {
         color: "yellow",
         weight: 3,
         opacity: 0.5,
         clickable: false,
         fill: true,
+    };
+    const yellowDuplicated = {
+        color: "yellow",
+        weight: 3,
+        opacity: 0.1,
+        clickable: false,
+        fill: true,
+        fillOpacity: 0.5,
+    };
+    const cell17Options = green;
+    const cell17DuplicatedOptions = yellowDuplicated;
+    const cell16Options = {
+        ...cell17Options,
+        fillOpacity: cell17Options.fillOpacity * 0.5,
+    };
+    const cell16DuplicatedOptions = {
+        ...cell17DuplicatedOptions,
+        fillOpacity: cell17DuplicatedOptions.fillOpacity * 0.5,
     };
     return {
         cell17NonZeroOptions: blue,
@@ -1194,25 +1233,13 @@ function createOptions() {
             [4, yellow],
             [18, yellow],
         ]),
-        cell17Options: {
-            color: "green",
-            weight: 3,
-            opacity: 0.1,
-            clickable: false,
-            fill: true,
-            fillOpacity: 0.5,
-        },
-        cell17DuplicatedOptions: {
-            color: "yellow",
-            weight: 3,
-            opacity: 0.1,
-            clickable: false,
-            fill: true,
-            fillOpacity: 0.5,
-        },
+        cell17Options,
+        cell17DuplicatedOptions,
+        cell16Options,
+        cell16DuplicatedOptions,
     };
 }
-function updateS2CellLayers(layer, visibleCells, isRefreshEnd, cellOptions) {
+function updatePgoS2CellLayers(layer, visibleCells, isRefreshEnd, cellOptions) {
     const isLatest = isRefreshEnd && 14 < map.getZoom();
     layer.clearLayers();
     for (const { corner, cell17s, portals } of visibleCells) {
@@ -1244,8 +1271,38 @@ function updateS2CellLayers(layer, visibleCells, isRefreshEnd, cellOptions) {
         }
     }
 }
+function updatePmbS2CellLayers(layer, visibleCells, cellOptions) {
+    layer.clearLayers();
+    const cell16Options = {
+        ...cellOptions.cell16Options,
+        className: styles_module["pmb-cell16"],
+    };
+    const cell16DuplicatedOptions = {
+        ...cellOptions.cell16DuplicatedOptions,
+        className: styles_module["pmb-cell16-duplicated"],
+    };
+    for (const { cell16s } of visibleCells) {
+        if (14 < map.getZoom()) {
+            for (const cell16 of cell16s.values()) {
+                const polygon16 = L.polygon(cell16.cell.getCornerLatLngs(), cell16.count > 1 ? cell16DuplicatedOptions : cell16Options);
+                layer.addLayer(polygon16);
+            }
+        }
+    }
+}
 function main() {
     handleAsyncError(asyncMain());
+}
+function appendAsSvg(svgText, options) {
+    const svg = new DOMParser().parseFromString(svgText, "image/svg+xml")
+        .children[0];
+    if (options?.defsOnly) {
+        for (const child of svg.children) {
+            if (child.tagName !== "defs")
+                child.remove();
+        }
+    }
+    document.body.appendChild(svg);
 }
 async function asyncMain() {
     var _a;
@@ -1269,27 +1326,43 @@ async function asyncMain() {
         addHook: window.addHook,
     };
     (_a = window).S2 || (_a.S2 = createS2Namespace());
-    const s2CellLayer = L.layerGroup();
-    iitc.addLayerGroup("S2Cell Records", s2CellLayer, true);
-    // レイヤーが無効なら何もしない
-    await waitUntilLayerAdded(map, (l) => l === s2CellLayer);
+    const pgoCellLayer = L.layerGroup();
+    const pmbCellLayer = L.layerGroup();
+    iitc.addLayerGroup("S2Cells - Pmb", pmbCellLayer, true);
+    iitc.addLayerGroup("S2Cells - Pgo", pgoCellLayer, true);
+    // どちらかのレイヤーが有効になるまで待つ
+    await waitUntilLayerAdded(map, (l) => l === pgoCellLayer || l === pmbCellLayer);
+    appendAsSvg(flower_pattern_namespaceObject, { defsOnly: true });
     addStyle(cssText);
     const records = await openRecords();
     const cellOptions = createOptions();
     async function updateLayersAsync(isRefreshEnd, signal) {
+        const enablePgoCellLayer = map.hasLayer(pgoCellLayer);
+        const enablePmbCellLayer = map.hasLayer(pmbCellLayer);
+        if (!enablePgoCellLayer && !enablePmbCellLayer)
+            return;
         if (map.getZoom() <= 13) {
-            s2CellLayer.clearLayers();
+            pgoCellLayer.clearLayers();
+            pmbCellLayer.clearLayers();
             return;
         }
+        const nearlyCells = await getNearlyCell14s(records, map.getBounds(), signal);
+        if (enablePgoCellLayer) {
+            updatePgoS2CellLayers(pgoCellLayer, nearlyCells, isRefreshEnd, cellOptions);
+        }
+        if (enablePmbCellLayer) {
+            updatePmbS2CellLayers(pmbCellLayer, nearlyCells, cellOptions);
+        }
+    }
+    async function onMapUpdated(isRefreshEnd, signal) {
         if (isRefreshEnd && 14 < map.getZoom()) {
             await updateRecordsOfCurrentPortals(records, iitc.portals, map.getBounds(), Date.now(), signal);
         }
-        const nearlyCells = await getNearlyCell14s(records, map.getBounds(), signal);
-        updateS2CellLayers(s2CellLayer, nearlyCells, isRefreshEnd, cellOptions);
+        await updateLayersAsync(isRefreshEnd, signal);
     }
     const updateRecordsAsyncCancelScope = createAsyncCancelScope(handleAsyncError);
     function updateLayers(isRefreshEnd) {
-        updateRecordsAsyncCancelScope((signal) => updateLayersAsync(isRefreshEnd, signal));
+        updateRecordsAsyncCancelScope((signal) => onMapUpdated(isRefreshEnd, signal));
     }
     updateLayers(false);
     map.on("moveend", () => updateLayers(false));
