@@ -18,6 +18,7 @@ export interface PortalRecord {
     readonly lng: number;
     readonly name: string;
     readonly data: IITCPortalData;
+    readonly firstFetchDate?: ClientDate;
     readonly lastFetchDate: ClientDate;
 
     readonly cell17Id: Cell17Id;
@@ -25,6 +26,7 @@ export interface PortalRecord {
 }
 export interface CellRecord<TLevel extends number> {
     readonly cellId: CellId<TLevel>;
+    readonly firstFetchDate?: ClientDate;
     readonly lastFetchDate: ClientDate;
     readonly centerLat: number;
     readonly centerLng: number;
@@ -209,7 +211,9 @@ export async function updateRecordsOfCurrentPortals(
         for (const [guid, p] of Object.entries(portals)) {
             const latLng = p.getLatLng();
             const name = p.options.data.title ?? "";
-            const portal = (yield* portalsStore.getPortalOfGuid(guid)) ?? {
+            const portal: PortalRecord = (yield* portalsStore.getPortalOfGuid(
+                guid
+            )) ?? {
                 guid,
                 lat: latLng.lat,
                 lng: latLng.lng,
@@ -217,6 +221,8 @@ export async function updateRecordsOfCurrentPortals(
                 data: p.options.data,
                 cell14Id: getCellId(latLng, 14),
                 cell17Id: getCellId(latLng, 17),
+                firstFetchDate: fetchDate,
+                lastFetchDate: fetchDate,
             };
 
             yield* portalsStore.setPortal({
@@ -227,6 +233,7 @@ export async function updateRecordsOfCurrentPortals(
                 data: p.options.data,
                 cell14Id: getCellId(latLng, 14),
                 cell17Id: getCellId(latLng, 17),
+                firstFetchDate: portal.firstFetchDate ?? fetchDate,
                 lastFetchDate: fetchDate,
             });
         }
@@ -235,12 +242,20 @@ export async function updateRecordsOfCurrentPortals(
         for (const cell14 of cell14s) {
             if (!boundsIncludesCell(cell14, fetchBounds)) continue;
 
+            const cell14Id = cell14.toString();
             const coordinates = cell14.getLatLng();
-            yield* portalsStore.setCell14({
+            const cell14Record: CellRecord<14> = (yield* portalsStore.getCell14(
+                cell14Id
+            )) ?? {
                 cellId: cell14.toString(),
                 centerLat: coordinates.lat,
                 centerLng: coordinates.lng,
+                firstFetchDate: fetchDate,
                 lastFetchDate: fetchDate,
+            };
+            yield* portalsStore.setCell14({
+                ...cell14Record,
+                firstFetchDate: cell14Record.firstFetchDate ?? fetchDate,
             });
         }
     });
