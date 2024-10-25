@@ -233,7 +233,6 @@ export async function updateRecordsOfCurrentPortals(
                 data: p.options.data,
                 cell14Id: getCellId(latLng, 14),
                 cell17Id: getCellId(latLng, 17),
-                firstFetchDate: portal.firstFetchDate ?? fetchDate,
                 lastFetchDate: fetchDate,
             });
         }
@@ -255,7 +254,7 @@ export async function updateRecordsOfCurrentPortals(
             };
             yield* portalsStore.setCell14({
                 ...cell14Record,
-                firstFetchDate: cell14Record.firstFetchDate ?? fetchDate,
+                lastFetchDate: fetchDate,
             });
         }
     });
