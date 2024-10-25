@@ -6,7 +6,7 @@
 // @downloadURL  https://github.com/wiinuk/iitc-plugin-portal-records/raw/main/iitc-plugin-portal-records.user.js
 // @updateURL    https://github.com/wiinuk/iitc-plugin-portal-records/raw/main/iitc-plugin-portal-records.user.js
 // @homepageURL  https://github.com/wiinuk/iitc-plugin-portal-records
-// @version      0.5.0
+// @version      0.6.0
 // @description  IITC plug-in to record portals and cells.
 // @author       Wiinuk
 // @include      https://*.ingress.com/intel*
@@ -603,14 +603,16 @@ function* getPortalsInCell14s(store, cell14s) {
 async function updateRecordsOfCurrentPortals(records, portals, fetchBounds, fetchDate, signal) {
     const cell14s = getNearlyCellsForBounds(fetchBounds, 14);
     await records.enterTransactionScope({ signal }, function* (portalsStore) {
-        // 領域内の古いポータルを削除
+        // 領域内に存在しないポータル記録を削除
         for (const portal of yield* getPortalsInCell14s(portalsStore, cell14s)) {
+            if (portals[portal.guid])
+                continue;
             const coordinates = L.latLng(portal.lat, portal.lng);
             if (!fetchBounds.contains(coordinates))
                 continue;
             yield* portalsStore.removePortal(portal.guid);
         }
-        // ポータルを追加
+        // ポータルを更新
         for (const [guid, p] of Object.entries(portals)) {
             const latLng = p.getLatLng();
             const name = p.options.data.title ?? "";
@@ -622,6 +624,7 @@ async function updateRecordsOfCurrentPortals(records, portals, fetchBounds, fetc
                 data: p.options.data,
                 cell14Id: getCellId(latLng, 14),
                 cell17Id: getCellId(latLng, 17),
+                firstFetchDate: fetchDate,
                 lastFetchDate: fetchDate,
             };
             yield* portalsStore.setPortal({
@@ -632,18 +635,26 @@ async function updateRecordsOfCurrentPortals(records, portals, fetchBounds, fetc
                 data: p.options.data,
                 cell14Id: getCellId(latLng, 14),
                 cell17Id: getCellId(latLng, 17),
+                firstFetchDate: portal.firstFetchDate ?? fetchDate,
+                lastFetchDate: fetchDate,
             });
         }
         // 全面が取得されたセル14を更新
         for (const cell14 of cell14s) {
             if (!boundsIncludesCell(cell14, fetchBounds))
                 continue;
+            const cell14Id = cell14.toString();
             const coordinates = cell14.getLatLng();
-            yield* portalsStore.setCell14({
+            const cell14Record = (yield* portalsStore.getCell14(cell14Id)) ?? {
                 cellId: cell14.toString(),
                 centerLat: coordinates.lat,
                 centerLng: coordinates.lng,
+                firstFetchDate: fetchDate,
                 lastFetchDate: fetchDate,
+            };
+            yield* portalsStore.setCell14({
+                ...cell14Record,
+                firstFetchDate: cell14Record.firstFetchDate ?? fetchDate,
             });
         }
     });
