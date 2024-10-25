@@ -6,7 +6,7 @@
 // @downloadURL  https://github.com/wiinuk/iitc-plugin-portal-records/raw/main/iitc-plugin-portal-records.user.js
 // @updateURL    https://github.com/wiinuk/iitc-plugin-portal-records/raw/main/iitc-plugin-portal-records.user.js
 // @homepageURL  https://github.com/wiinuk/iitc-plugin-portal-records
-// @version      0.6.0
+// @version      0.6.1
 // @description  IITC plug-in to record portals and cells.
 // @author       Wiinuk
 // @include      https://*.ingress.com/intel*
@@ -635,7 +635,6 @@ async function updateRecordsOfCurrentPortals(records, portals, fetchBounds, fetc
                 data: p.options.data,
                 cell14Id: getCellId(latLng, 14),
                 cell17Id: getCellId(latLng, 17),
-                firstFetchDate: portal.firstFetchDate ?? fetchDate,
                 lastFetchDate: fetchDate,
             });
         }
@@ -654,7 +653,7 @@ async function updateRecordsOfCurrentPortals(records, portals, fetchBounds, fetc
             };
             yield* portalsStore.setCell14({
                 ...cell14Record,
-                firstFetchDate: cell14Record.firstFetchDate ?? fetchDate,
+                lastFetchDate: fetchDate,
             });
         }
     });
@@ -1242,7 +1241,7 @@ function createOptions() {
         clickable: false,
         fill: false,
     };
-    const tooCloseRecentlyOptions = { ...tooCloseOptions, color: "red" };
+    const tooCloseNewDiscoveryOptions = { ...tooCloseOptions, color: "red" };
     return {
         cell17NonZeroOptions: blue,
         cell17CountToOptions: new Map([
@@ -1257,7 +1256,7 @@ function createOptions() {
         cell16Options,
         cell16DuplicatedOptions,
         tooCloseOptions,
-        tooCloseRecentlyOptions,
+        tooCloseNewDiscoveryOptions,
     };
 }
 function updatePgoS2CellLayers(layer, visibleCells, isRefreshEnd, zoom, cellOptions) {
@@ -1315,9 +1314,14 @@ function updateTooCloseLayers(layer, visibleCells, _isRefreshEnd, zoom, cellOpti
     layer.clearLayers();
     if (15 >= zoom)
         return;
+    const expires = Date.now() - 1000 * 60 * 60 * 24 * 3;
     for (const { portals } of visibleCells) {
         for (const [, portal] of portals) {
-            const circle = L.circle(portal, 20, cellOptions.tooCloseOptions);
+            const isNewDiscovery = expires <= (portal.firstFetchDate ?? 0);
+            const options = isNewDiscovery
+                ? cellOptions.tooCloseNewDiscoveryOptions
+                : cellOptions.tooCloseOptions;
+            const circle = L.circle(portal, 20, options);
             layer.addLayer(circle);
         }
     }
