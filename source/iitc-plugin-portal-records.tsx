@@ -109,7 +109,7 @@ function createOptions() {
         clickable: false,
         fill: false,
     } satisfies L.PathOptions;
-    const tooCloseRecentlyOptions = { ...tooCloseOptions, color: "red" };
+    const tooCloseNewDiscoveryOptions = { ...tooCloseOptions, color: "red" };
 
     return {
         cell17NonZeroOptions: blue,
@@ -125,7 +125,7 @@ function createOptions() {
         cell16Options,
         cell16DuplicatedOptions,
         tooCloseOptions,
-        tooCloseRecentlyOptions,
+        tooCloseNewDiscoveryOptions,
     } as const;
 }
 function updatePgoS2CellLayers(
@@ -210,9 +210,15 @@ function updateTooCloseLayers(
     layer.clearLayers();
     if (15 >= zoom) return;
 
+    const expires = Date.now() - 1000 * 60 * 60 * 24 * 3;
     for (const { portals } of visibleCells) {
         for (const [, portal] of portals) {
-            const circle = L.circle(portal, 20, cellOptions.tooCloseOptions);
+            const isNewDiscovery = expires <= (portal.firstFetchDate ?? 0);
+            const options = isNewDiscovery
+                ? cellOptions.tooCloseNewDiscoveryOptions
+                : cellOptions.tooCloseOptions;
+
+            const circle = L.circle(portal, 20, options);
             layer.addLayer(circle);
         }
     }
