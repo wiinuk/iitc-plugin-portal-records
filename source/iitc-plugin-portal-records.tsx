@@ -104,11 +104,10 @@ function createOptions() {
 
     const tooCloseOptions = {
         color: "orange",
-        weight: 3,
-        opacity: 1,
+        weight: 2,
+        opacity: 0.8,
         clickable: false,
         fill: false,
-        fillOpacity: 0.1,
     } satisfies L.PathOptions;
     const tooCloseRecentlyOptions = { ...tooCloseOptions, color: "red" };
 
@@ -209,7 +208,7 @@ function updateTooCloseLayers(
     cellOptions: ReturnType<typeof createOptions>
 ) {
     layer.clearLayers();
-    if (14 >= zoom) return;
+    if (15 >= zoom) return;
 
     for (const { portals } of visibleCells) {
         for (const [, portal] of portals) {

@@ -6,7 +6,7 @@
 // @downloadURL  https://github.com/wiinuk/iitc-plugin-portal-records/raw/main/iitc-plugin-portal-records.user.js
 // @updateURL    https://github.com/wiinuk/iitc-plugin-portal-records/raw/main/iitc-plugin-portal-records.user.js
 // @homepageURL  https://github.com/wiinuk/iitc-plugin-portal-records
-// @version      0.4.0
+// @version      0.5.0
 // @description  IITC plug-in to record portals and cells.
 // @author       Wiinuk
 // @include      https://*.ingress.com/intel*
@@ -1224,6 +1224,14 @@ function createOptions() {
         ...cell17DuplicatedOptions,
         fillOpacity: cell17DuplicatedOptions.fillOpacity * 0.5,
     };
+    const tooCloseOptions = {
+        color: "orange",
+        weight: 2,
+        opacity: 0.8,
+        clickable: false,
+        fill: false,
+    };
+    const tooCloseRecentlyOptions = { ...tooCloseOptions, color: "red" };
     return {
         cell17NonZeroOptions: blue,
         cell17CountToOptions: new Map([
@@ -1237,17 +1245,19 @@ function createOptions() {
         cell17DuplicatedOptions,
         cell16Options,
         cell16DuplicatedOptions,
+        tooCloseOptions,
+        tooCloseRecentlyOptions,
     };
 }
-function updatePgoS2CellLayers(layer, visibleCells, isRefreshEnd, cellOptions) {
-    const isLatest = isRefreshEnd && 14 < map.getZoom();
+function updatePgoS2CellLayers(layer, visibleCells, isRefreshEnd, zoom, cellOptions) {
+    const isLatest = isRefreshEnd && 14 < zoom;
     layer.clearLayers();
     for (const { corner, cell17s, portals } of visibleCells) {
         const options = cellOptions.cell17CountToOptions.get(cell17s.size) ??
             cellOptions.cell17NonZeroOptions;
         const polygon = L.polygon(corner, options);
         layer.addLayer(polygon);
-        if (13 < map.getZoom()) {
+        if (13 < zoom) {
             const center = polygon.getBounds().getCenter();
             const label = L.marker(center, {
                 clickable: true,
@@ -1261,7 +1271,7 @@ function updatePgoS2CellLayers(layer, visibleCells, isRefreshEnd, cellOptions) {
             });
             layer.addLayer(label);
         }
-        if (14 < map.getZoom()) {
+        if (14 < zoom) {
             for (const cell17 of cell17s.values()) {
                 const polygon17 = L.polygon(cell17.cell.getCornerLatLngs(), cell17.count > 1
                     ? cellOptions.cell17DuplicatedOptions
@@ -1271,7 +1281,7 @@ function updatePgoS2CellLayers(layer, visibleCells, isRefreshEnd, cellOptions) {
         }
     }
 }
-function updatePmbS2CellLayers(layer, visibleCells, cellOptions) {
+function updatePmbS2CellLayers(layer, visibleCells, _isRefreshEnd, zoom, cellOptions) {
     layer.clearLayers();
     const cell16Options = {
         ...cellOptions.cell16Options,
@@ -1282,11 +1292,22 @@ function updatePmbS2CellLayers(layer, visibleCells, cellOptions) {
         className: styles_module["pmb-cell16-duplicated"],
     };
     for (const { cell16s } of visibleCells) {
-        if (14 < map.getZoom()) {
+        if (14 < zoom) {
             for (const cell16 of cell16s.values()) {
                 const polygon16 = L.polygon(cell16.cell.getCornerLatLngs(), cell16.count > 1 ? cell16DuplicatedOptions : cell16Options);
                 layer.addLayer(polygon16);
             }
+        }
+    }
+}
+function updateTooCloseLayers(layer, visibleCells, _isRefreshEnd, zoom, cellOptions) {
+    layer.clearLayers();
+    if (15 >= zoom)
+        return;
+    for (const { portals } of visibleCells) {
+        for (const [, portal] of portals) {
+            const circle = L.circle(portal, 20, cellOptions.tooCloseOptions);
+            layer.addLayer(circle);
         }
     }
 }
@@ -1326,32 +1347,56 @@ async function asyncMain() {
         addHook: window.addHook,
     };
     (_a = window).S2 || (_a.S2 = createS2Namespace());
-    const pgoCellLayer = L.layerGroup();
-    const pmbCellLayer = L.layerGroup();
-    iitc.addLayerGroup("S2Cells - Pmb", pmbCellLayer, true);
-    iitc.addLayerGroup("S2Cells - Pgo", pgoCellLayer, true);
-    // どちらかのレイヤーが有効になるまで待つ
-    await waitUntilLayerAdded(map, (l) => l === pgoCellLayer || l === pmbCellLayer);
+    const layerDefinitions = [
+        {
+            name: "S2Cells - Pmb",
+            update: updatePmbS2CellLayers,
+        },
+        {
+            name: "S2Cells - Pgo",
+            update: updatePgoS2CellLayers,
+        },
+        {
+            name: "Too Close Circles",
+            update: updateTooCloseLayers,
+        },
+    ];
+    const layers = layerDefinitions.map((l) => ({
+        ...l,
+        layer: L.layerGroup(),
+    }));
+    for (const { name, layer } of layers) {
+        iitc.addLayerGroup(name, layer, true);
+    }
+    // どれかのレイヤーが有効になるまで待つ
+    await waitUntilLayerAdded(map, (l) => {
+        for (const { layer } of layers) {
+            if (l === layer)
+                return true;
+        }
+        return false;
+    });
     appendAsSvg(flower_pattern_namespaceObject, { defsOnly: true });
     addStyle(cssText);
     const records = await openRecords();
     const cellOptions = createOptions();
     async function updateLayersAsync(isRefreshEnd, signal) {
-        const enablePgoCellLayer = map.hasLayer(pgoCellLayer);
-        const enablePmbCellLayer = map.hasLayer(pmbCellLayer);
-        if (!enablePgoCellLayer && !enablePmbCellLayer)
+        let enabledLayers = null;
+        for (const l of layers) {
+            if (map.hasLayer(l.layer)) {
+                (enabledLayers ?? (enabledLayers = [])).push(l);
+            }
+        }
+        if (!enabledLayers || enabledLayers.length === 0)
             return;
         if (map.getZoom() <= 13) {
-            pgoCellLayer.clearLayers();
-            pmbCellLayer.clearLayers();
+            for (const { layer } of layers)
+                layer.clearLayers();
             return;
         }
         const nearlyCells = await getNearlyCell14s(records, map.getBounds(), signal);
-        if (enablePgoCellLayer) {
-            updatePgoS2CellLayers(pgoCellLayer, nearlyCells, isRefreshEnd, cellOptions);
-        }
-        if (enablePmbCellLayer) {
-            updatePmbS2CellLayers(pmbCellLayer, nearlyCells, cellOptions);
+        for (const { layer, update } of enabledLayers) {
+            update(layer, nearlyCells, isRefreshEnd, map.getZoom(), cellOptions);
         }
     }
     async function onMapUpdated(isRefreshEnd, signal) {
