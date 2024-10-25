@@ -102,6 +102,16 @@ function createOptions() {
         fillOpacity: cell17DuplicatedOptions.fillOpacity * 0.5,
     };
 
+    const tooCloseOptions = {
+        color: "orange",
+        weight: 3,
+        opacity: 1,
+        clickable: false,
+        fill: false,
+        fillOpacity: 0.1,
+    } satisfies L.PathOptions;
+    const tooCloseRecentlyOptions = { ...tooCloseOptions, color: "red" };
+
     return {
         cell17NonZeroOptions: blue,
         cell17CountToOptions: new Map([
@@ -115,15 +125,18 @@ function createOptions() {
         cell17DuplicatedOptions,
         cell16Options,
         cell16DuplicatedOptions,
+        tooCloseOptions,
+        tooCloseRecentlyOptions,
     } as const;
 }
 function updatePgoS2CellLayers(
     layer: L.LayerGroup<L.ILayer>,
     visibleCells: Iterable<Cell14Statistics>,
     isRefreshEnd: boolean,
+    zoom: number,
     cellOptions: ReturnType<typeof createOptions>
 ) {
-    const isLatest = isRefreshEnd && 14 < map.getZoom();
+    const isLatest = isRefreshEnd && 14 < zoom;
 
     layer.clearLayers();
     for (const { corner, cell17s, portals } of visibleCells) {
@@ -132,7 +145,7 @@ function updatePgoS2CellLayers(
             cellOptions.cell17NonZeroOptions;
         const polygon = L.polygon(corner, options);
         layer.addLayer(polygon);
-        if (13 < map.getZoom()) {
+        if (13 < zoom) {
             const center = polygon.getBounds().getCenter();
             const label = L.marker(center, {
                 clickable: true,
@@ -146,7 +159,7 @@ function updatePgoS2CellLayers(
             });
             layer.addLayer(label);
         }
-        if (14 < map.getZoom()) {
+        if (14 < zoom) {
             for (const cell17 of cell17s.values()) {
                 const polygon17 = L.polygon(
                     cell17.cell.getCornerLatLngs(),
@@ -162,6 +175,8 @@ function updatePgoS2CellLayers(
 function updatePmbS2CellLayers(
     layer: L.LayerGroup<L.ILayer>,
     visibleCells: Iterable<Cell14Statistics>,
+    _isRefreshEnd: boolean,
+    zoom: number,
     cellOptions: ReturnType<typeof createOptions>
 ) {
     layer.clearLayers();
@@ -175,7 +190,7 @@ function updatePmbS2CellLayers(
     };
 
     for (const { cell16s } of visibleCells) {
-        if (14 < map.getZoom()) {
+        if (14 < zoom) {
             for (const cell16 of cell16s.values()) {
                 const polygon16 = L.polygon(
                     cell16.cell.getCornerLatLngs(),
@@ -183,6 +198,23 @@ function updatePmbS2CellLayers(
                 );
                 layer.addLayer(polygon16);
             }
+        }
+    }
+}
+function updateTooCloseLayers(
+    layer: L.LayerGroup<L.ILayer>,
+    visibleCells: Iterable<Cell14Statistics>,
+    _isRefreshEnd: boolean,
+    zoom: number,
+    cellOptions: ReturnType<typeof createOptions>
+) {
+    layer.clearLayers();
+    if (14 >= zoom) return;
+
+    for (const { portals } of visibleCells) {
+        for (const [, portal] of portals) {
+            const circle = L.circle(portal, 20, cellOptions.tooCloseOptions);
+            layer.addLayer(circle);
         }
     }
 }
@@ -237,16 +269,36 @@ async function asyncMain() {
 
     (window as typeof window & { S2?: typeof S2 }).S2 ||= createS2Namespace();
 
-    const pgoCellLayer = L.layerGroup();
-    const pmbCellLayer = L.layerGroup();
-    iitc.addLayerGroup("S2Cells - Pmb", pmbCellLayer, true);
-    iitc.addLayerGroup("S2Cells - Pgo", pgoCellLayer, true);
+    const layerDefinitions = [
+        {
+            name: "S2Cells - Pmb",
+            update: updatePmbS2CellLayers,
+        },
+        {
+            name: "S2Cells - Pgo",
+            update: updatePgoS2CellLayers,
+        },
+        {
+            name: "Too Close Circles",
+            update: updateTooCloseLayers,
+        },
+    ];
+    const layers = layerDefinitions.map((l) => ({
+        ...l,
+        layer: L.layerGroup(),
+    }));
 
-    // どちらかのレイヤーが有効になるまで待つ
-    await waitUntilLayerAdded(
-        map,
-        (l) => l === pgoCellLayer || l === pmbCellLayer
-    );
+    for (const { name, layer } of layers) {
+        iitc.addLayerGroup(name, layer, true);
+    }
+
+    // どれかのレイヤーが有効になるまで待つ
+    await waitUntilLayerAdded(map, (l) => {
+        for (const { layer } of layers) {
+            if (l === layer) return true;
+        }
+        return false;
+    });
 
     appendAsSvg(flowerPatternSvgText, { defsOnly: true });
     addStyle(cssText);
@@ -257,13 +309,16 @@ async function asyncMain() {
         isRefreshEnd: boolean,
         signal: AbortSignal
     ) {
-        const enablePgoCellLayer = map.hasLayer(pgoCellLayer);
-        const enablePmbCellLayer = map.hasLayer(pmbCellLayer);
-        if (!enablePgoCellLayer && !enablePmbCellLayer) return;
+        let enabledLayers: typeof layers | null = null;
+        for (const l of layers) {
+            if (map.hasLayer(l.layer)) {
+                (enabledLayers ??= []).push(l);
+            }
+        }
+        if (!enabledLayers || enabledLayers.length === 0) return;
 
         if (map.getZoom() <= 13) {
-            pgoCellLayer.clearLayers();
-            pmbCellLayer.clearLayers();
+            for (const { layer } of layers) layer.clearLayers();
             return;
         }
         const nearlyCells = await getNearlyCell14s(
@@ -271,16 +326,14 @@ async function asyncMain() {
             map.getBounds(),
             signal
         );
-        if (enablePgoCellLayer) {
-            updatePgoS2CellLayers(
-                pgoCellLayer,
+        for (const { layer, update } of enabledLayers) {
+            update(
+                layer,
                 nearlyCells,
                 isRefreshEnd,
+                map.getZoom(),
                 cellOptions
             );
-        }
-        if (enablePmbCellLayer) {
-            updatePmbS2CellLayers(pmbCellLayer, nearlyCells, cellOptions);
         }
     }
     async function onMapUpdated(isRefreshEnd: boolean, signal: AbortSignal) {
