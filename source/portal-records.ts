@@ -194,17 +194,18 @@ export async function updateRecordsOfCurrentPortals(
 ) {
     const cell14s = getNearlyCellsForBounds(fetchBounds, 14);
     await records.enterTransactionScope({ signal }, function* (portalsStore) {
-        // 領域内の古いポータルを削除
+        // 領域内に存在しないポータル記録を削除
         for (const portal of yield* getPortalsInCell14s(
             portalsStore,
             cell14s
         )) {
+            if (portals[portal.guid]) continue;
             const coordinates = L.latLng(portal.lat, portal.lng);
             if (!fetchBounds.contains(coordinates)) continue;
             yield* portalsStore.removePortal(portal.guid);
         }
 
-        // ポータルを追加
+        // ポータルを更新
         for (const [guid, p] of Object.entries(portals)) {
             const latLng = p.getLatLng();
             const name = p.options.data.title ?? "";
@@ -216,7 +217,6 @@ export async function updateRecordsOfCurrentPortals(
                 data: p.options.data,
                 cell14Id: getCellId(latLng, 14),
                 cell17Id: getCellId(latLng, 17),
-                lastFetchDate: fetchDate,
             };
 
             yield* portalsStore.setPortal({
@@ -227,6 +227,7 @@ export async function updateRecordsOfCurrentPortals(
                 data: p.options.data,
                 cell14Id: getCellId(latLng, 14),
                 cell17Id: getCellId(latLng, 17),
+                lastFetchDate: fetchDate,
             });
         }
 
