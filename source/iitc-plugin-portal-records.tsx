@@ -51,41 +51,38 @@ function waitUntilLayerAdded(
 }
 
 function createOptions() {
-    const blue = {
-        color: "blue",
+    const baseOptions = {
         weight: 3,
-        opacity: 0.1,
         clickable: false,
+        pointerEvents: "none",
         fill: true,
+    } satisfies L.PolylineOptions;
+
+    const blue = {
+        ...baseOptions,
+        opacity: 0.1,
+        color: "blue",
     } satisfies L.PolylineOptions;
     const red = {
+        ...baseOptions,
         color: "red",
-        weight: 3,
         opacity: 0.5,
-        clickable: false,
-        fill: true,
     } satisfies L.PolylineOptions;
     const green = {
+        ...baseOptions,
         color: "green",
-        weight: 3,
         opacity: 0.1,
-        clickable: false,
-        fill: true,
         fillOpacity: 0.5,
     } satisfies L.PolylineOptions;
     const yellow = {
+        ...baseOptions,
         color: "yellow",
-        weight: 3,
         opacity: 0.5,
-        clickable: false,
-        fill: true,
     } satisfies L.PolylineOptions;
     const yellowDuplicated = {
+        ...baseOptions,
         color: "yellow",
-        weight: 3,
         opacity: 0.1,
-        clickable: false,
-        fill: true,
         fillOpacity: 0.5,
     } satisfies L.PolylineOptions;
 
