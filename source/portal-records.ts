@@ -1,4 +1,9 @@
 // spell-checker: ignore Lngs
+import {
+    getCell14PortalsByModifier,
+    type FakePortalRecord,
+    type PortalModifier,
+} from "./portal-modifier";
 import { id } from "./standard-extensions";
 import * as Idb from "./typed-idb";
 import {
@@ -23,6 +28,8 @@ export interface PortalRecord {
 
     readonly cell17Id: Cell17Id;
     readonly cell14Id: Cell14Id;
+
+    readonly isFake?: undefined;
 }
 export interface CellRecord<TLevel extends number> {
     readonly cellId: CellId<TLevel>;
@@ -129,7 +136,7 @@ export async function openRecords(): Promise<PortalRecords> {
     };
 }
 
-function isSponsoredPortal({ name }: PortalRecord) {
+function isSponsoredPortal({ name }: PortalRecord | FakePortalRecord) {
     return /ITO EN|ローソン|Lawson|ソフトバンク|Softbank|ワイモバイル|Y!mobile/.test(
         name
     );
@@ -272,7 +279,7 @@ export interface Cell14Statistics {
     readonly cell16s: CellStatisticMap<16>;
     readonly corner: [S2LatLng, S2LatLng, S2LatLng, S2LatLng];
     readonly cell: Cell<14>;
-    readonly portals: Map<string, PortalRecord>;
+    readonly portals: Map<string, PortalRecord | FakePortalRecord>;
 }
 function createEmptyCell14Statistics(cell: Cell<14>): Cell14Statistics {
     return {
@@ -300,28 +307,32 @@ function updateCellStatistics<TLevel extends number>(
 }
 export async function getNearlyCell14s(
     records: PortalRecords,
+    modifiers: readonly PortalModifier[],
     bounds: L.LatLngBounds,
     signal: AbortSignal
 ) {
-    return await records.enterTransactionScope({ signal }, function* (store) {
-        const result: Cell14Statistics[] = [];
-        for (const cell of getNearlyCellsForBounds(bounds, 14)) {
-            const cellId = cell.toString();
-            let cell14: Cell14Statistics | undefined;
-            yield* store.iteratePortalsInCell14(cellId, (portal) => {
-                if (isSponsoredPortal(portal)) return "continue";
+    const result: Cell14Statistics[] = [];
+    for (const cell of getNearlyCellsForBounds(bounds, 14)) {
+        const cellId = cell.toString();
+        let cell14: Cell14Statistics | undefined;
+        const collectPortal = (portal: PortalRecord | FakePortalRecord) => {
+            if (isSponsoredPortal(portal)) return "continue";
 
-                cell14 ??= createEmptyCell14Statistics(cell);
-                const latLng = L.latLng(portal.lat, portal.lng);
-                const coordinateKey = latLng.toString();
-                if (cell14.portals.get(coordinateKey) != null) return;
+            cell14 ??= createEmptyCell14Statistics(cell);
+            const latLng = L.latLng(portal.lat, portal.lng);
+            const coordinateKey = latLng.toString();
+            if (cell14.portals.get(coordinateKey) != null) return;
 
-                cell14.portals.set(coordinateKey, portal);
-                updateCellStatistics(cell14.cell16s, latLng, 16);
-                updateCellStatistics(cell14.cell17s, latLng, 17);
-            });
-            if (cell14) result.push(cell14);
-        }
-        return result;
-    });
+            cell14.portals.set(coordinateKey, portal);
+            updateCellStatistics(cell14.cell16s, latLng, 16);
+            updateCellStatistics(cell14.cell17s, latLng, 17);
+        };
+        await records.enterTransactionScope({ signal }, function* (store) {
+            yield* store.iteratePortalsInCell14(cellId, collectPortal);
+        });
+        const portals = await getCell14PortalsByModifier(modifiers, cell);
+        if (portals) for (const portal of portals) collectPortal(portal);
+        if (cell14) result.push(cell14);
+    }
+    return result;
 }

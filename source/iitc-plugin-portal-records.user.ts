@@ -6,7 +6,7 @@
 // @downloadURL  https://github.com/wiinuk/iitc-plugin-portal-records/raw/main/iitc-plugin-portal-records.user.js
 // @updateURL    https://github.com/wiinuk/iitc-plugin-portal-records/raw/main/iitc-plugin-portal-records.user.js
 // @homepageURL  https://github.com/wiinuk/iitc-plugin-portal-records
-// @version      0.6.1
+// @version      0.8.1
 // @description  IITC plug-in to record portals and cells.
 // @author       Wiinuk
 // @include      https://*.ingress.com/intel*
@@ -58,7 +58,7 @@ function wrapper(plugin_info: PluginInfo) {
 
     // メタデータを追加する
     plugin_info.dateTimeVersion = "20221226000000";
-    plugin_info.pluginId = "pgo-route-helper";
+    plugin_info.pluginId = "portal-records";
 
     // setup 内で IITC はロード済みと仮定できる
     const setup: SetupHook = function setup() {

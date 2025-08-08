@@ -6,7 +6,7 @@
 // @downloadURL  https://github.com/wiinuk/iitc-plugin-portal-records/raw/main/iitc-plugin-portal-records.user.js
 // @updateURL    https://github.com/wiinuk/iitc-plugin-portal-records/raw/main/iitc-plugin-portal-records.user.js
 // @homepageURL  https://github.com/wiinuk/iitc-plugin-portal-records
-// @version      0.6.1
+// @version      0.8.1
 // @description  IITC plug-in to record portals and cells.
 // @author       Wiinuk
 // @include      https://*.ingress.com/intel*
@@ -84,39 +84,6 @@ function id(x) {
 }
 function standard_extensions_ignore(..._args) {
     /* 引数を無視する関数 */
-}
-let ignoreReporterCache;
-function createProgressReporter(progress, total) {
-    class MessagedProgressEvent extends ProgressEvent {
-        constructor(message, options) {
-            super("message", options);
-            this.message = message;
-        }
-    }
-    if (progress === undefined) {
-        return (ignoreReporterCache ?? (ignoreReporterCache = {
-            next: standard_extensions_ignore,
-            done: standard_extensions_ignore,
-        }));
-    }
-    let loaded = 0;
-    return {
-        next(message) {
-            loaded = Math.max(loaded + 1, total);
-            progress(new MessagedProgressEvent(message, {
-                lengthComputable: true,
-                loaded,
-                total,
-            }));
-        },
-        done(message) {
-            progress(new MessagedProgressEvent(message, {
-                lengthComputable: true,
-                loaded: total,
-                total,
-            }));
-        },
-    };
 }
 class AbortError extends Error {
     constructor(message) {
@@ -334,6 +301,20 @@ function sleepUntilNextAnimationFrame(options) {
     });
 }
 
+;// CONCATENATED MODULE: ./source/portal-modifier.ts
+async function getCell14PortalsByModifier(modifiers, cell) {
+    const cellId = cell.toString();
+    const bounds = L.latLngBounds(cell.getCornerLatLngs());
+    const portals = [];
+    for (const modifier of modifiers) {
+        await modifier.getPortals?.(bounds, portals);
+    }
+    return portals.filter((p) => p.cell14Id === cellId);
+}
+function generatePortalGuid() {
+    return crypto.randomUUID().replace(/-/g, "") + ".16"; // .22 形式もある
+}
+
 ;// CONCATENATED MODULE: ./source/typed-idb.ts
 
 const privateTagSymbol = Symbol("privateTagSymbol");
@@ -487,6 +468,7 @@ function getCellId(latLng, level) {
 
 ;// CONCATENATED MODULE: ./source/portal-records.ts
 // spell-checker: ignore Lngs
+
 
 
 
@@ -677,29 +659,34 @@ function updateCellStatistics(cells, portalLatLng, level) {
         });
     statistics.count++;
 }
-async function getNearlyCell14s(records, bounds, signal) {
-    return await records.enterTransactionScope({ signal }, function* (store) {
-        const result = [];
-        for (const cell of getNearlyCellsForBounds(bounds, 14)) {
-            const cellId = cell.toString();
-            let cell14;
-            yield* store.iteratePortalsInCell14(cellId, (portal) => {
-                if (isSponsoredPortal(portal))
-                    return "continue";
-                cell14 ?? (cell14 = createEmptyCell14Statistics(cell));
-                const latLng = L.latLng(portal.lat, portal.lng);
-                const coordinateKey = latLng.toString();
-                if (cell14.portals.get(coordinateKey) != null)
-                    return;
-                cell14.portals.set(coordinateKey, portal);
-                updateCellStatistics(cell14.cell16s, latLng, 16);
-                updateCellStatistics(cell14.cell17s, latLng, 17);
-            });
-            if (cell14)
-                result.push(cell14);
-        }
-        return result;
-    });
+async function getNearlyCell14s(records, modifiers, bounds, signal) {
+    const result = [];
+    for (const cell of getNearlyCellsForBounds(bounds, 14)) {
+        const cellId = cell.toString();
+        let cell14;
+        const collectPortal = (portal) => {
+            if (isSponsoredPortal(portal))
+                return "continue";
+            cell14 ?? (cell14 = createEmptyCell14Statistics(cell));
+            const latLng = L.latLng(portal.lat, portal.lng);
+            const coordinateKey = latLng.toString();
+            if (cell14.portals.get(coordinateKey) != null)
+                return;
+            cell14.portals.set(coordinateKey, portal);
+            updateCellStatistics(cell14.cell16s, latLng, 16);
+            updateCellStatistics(cell14.cell17s, latLng, 17);
+        };
+        await records.enterTransactionScope({ signal }, function* (store) {
+            yield* store.iteratePortalsInCell14(cellId, collectPortal);
+        });
+        const portals = await getCell14PortalsByModifier(modifiers, cell);
+        if (portals)
+            for (const portal of portals)
+                collectPortal(portal);
+        if (cell14)
+            result.push(cell14);
+    }
+    return result;
 }
 
 ;// CONCATENATED MODULE: ./source/styles.module.css
@@ -714,22 +701,30 @@ const variables = {};
 
 ;// CONCATENATED MODULE: ./source/public-api.ts
 
-function createPublicApi(records) {
-    return {
-        getS2Cell14(lat, lng, options) {
-            return records.enterTransactionScope(options, function* (records) {
-                const cellId = getCellId(L.latLng(lat, lng), 14);
-                const cell = yield* records.getCell14(cellId);
-                const portals = new Map();
+
+function createPublicApi(records, modifiers) {
+    return Object.freeze({
+        version: "0.8.0",
+        async getS2Cell14(lat, lng, options) {
+            const cell14 = createCellFromCoordinates(L.latLng(lat, lng), 14);
+            const cellId = cell14.toString();
+            const portals = new Map();
+            let cell;
+            await records.enterTransactionScope(options, function* (records) {
+                cell = yield* records.getCell14(cellId);
                 yield* records.iteratePortalsInCell14(cellId, (portal) => {
                     portals.set(portal.guid, portal);
                     return "continue";
                 });
-                return {
-                    cell,
-                    portals,
-                };
             });
+            const additionalPortals = await getCell14PortalsByModifier(modifiers, cell14);
+            for (const portal of additionalPortals) {
+                portals.set(portal.guid, portal);
+            }
+            return {
+                cell,
+                portals,
+            };
         },
         iterateAllPortals(action, options) {
             return records.enterTransactionScope(options, (portals) => portals.iteratePortals(action));
@@ -737,7 +732,31 @@ function createPublicApi(records) {
         iterateAllS2Cell14(action, options) {
             return records.enterTransactionScope(options, (portals) => portals.iterateCell14s(action));
         },
-    };
+        registerModifier(modifier) {
+            if (modifier.id != null)
+                this.unregisterModifier(modifier.id);
+            modifiers.push(modifier);
+        },
+        unregisterModifier(id) {
+            if (id == null)
+                return;
+            modifiers.splice(0, modifiers.length, ...modifiers.filter((m) => m.id !== id));
+        },
+        createNewFakePortal(lat, lng, name) {
+            const latLng = L.latLng(lat, lng);
+            return {
+                guid: generatePortalGuid(),
+                lat,
+                lng,
+                name,
+                cell14Id: getCellId(latLng, 14),
+                cell17Id: getCellId(latLng, 17),
+                data: {},
+                lastFetchDate: Date.now(),
+                isFake: true,
+            };
+        },
+    });
 }
 
 ;// CONCATENATED MODULE: ./source/promise-source.ts
@@ -1158,6 +1177,7 @@ const flower_pattern_namespaceObject = "<svg xmlns=\"http://www.w3.org/2000/svg\
 
 
 
+
 function reportError(error) {
     console.error(error);
     if (error != null &&
@@ -1187,41 +1207,37 @@ function waitUntilLayerAdded(map, predicate) {
     });
 }
 function createOptions() {
-    const blue = {
-        color: "blue",
+    const baseOptions = {
         weight: 3,
-        opacity: 0.1,
         clickable: false,
+        pointerEvents: "none",
         fill: true,
+    };
+    const blue = {
+        ...baseOptions,
+        opacity: 0.1,
+        color: "blue",
     };
     const red = {
+        ...baseOptions,
         color: "red",
-        weight: 3,
         opacity: 0.5,
-        clickable: false,
-        fill: true,
     };
     const green = {
+        ...baseOptions,
         color: "green",
-        weight: 3,
         opacity: 0.1,
-        clickable: false,
-        fill: true,
         fillOpacity: 0.5,
     };
     const yellow = {
+        ...baseOptions,
         color: "yellow",
-        weight: 3,
         opacity: 0.5,
-        clickable: false,
-        fill: true,
     };
     const yellowDuplicated = {
+        ...baseOptions,
         color: "yellow",
-        weight: 3,
         opacity: 0.1,
-        clickable: false,
-        fill: true,
         fillOpacity: 0.5,
     };
     const cell17Options = green;
@@ -1395,6 +1411,7 @@ async function asyncMain() {
     addStyle(cssText);
     const records = await openRecords();
     const cellOptions = createOptions();
+    const modifiers = [];
     async function updateLayersAsync(isRefreshEnd, signal) {
         let enabledLayers = null;
         for (const l of layers) {
@@ -1409,7 +1426,7 @@ async function asyncMain() {
                 layer.clearLayers();
             return;
         }
-        const nearlyCells = await getNearlyCell14s(records, map.getBounds(), signal);
+        const nearlyCells = await getNearlyCell14s(records, modifiers, map.getBounds(), signal);
         for (const { layer, update } of enabledLayers) {
             update(layer, nearlyCells, isRefreshEnd, map.getZoom(), cellOptions);
         }
@@ -1429,7 +1446,7 @@ async function asyncMain() {
     iitc.addHook("mapDataRefreshEnd", () => updateLayers(true));
     const appendSearchResultAsyncCancelScope = createAsyncCancelScope(handleAsyncError);
     iitc.addHook("search", (query) => appendSearchResultAsyncCancelScope((signal) => appendIitcSearchResult(iitc, query, records, signal)));
-    publicApiSource.setResult(createPublicApi(records));
+    publicApiSource.setResult(createPublicApi(records, modifiers));
 }
 
 ;// CONCATENATED MODULE: ./source/iitc-plugin-portal-records.user.ts
@@ -1447,7 +1464,7 @@ function wrapper(plugin_info) {
     }
     // メタデータを追加する
     plugin_info.dateTimeVersion = "20221226000000";
-    plugin_info.pluginId = "pgo-route-helper";
+    plugin_info.pluginId = "portal-records";
     // setup 内で IITC はロード済みと仮定できる
     const setup = function setup() {
         const pluginModule = window["_iitc-plugin-portal-records-97383620-8c7a-4da6-99b5-36afca698435"];

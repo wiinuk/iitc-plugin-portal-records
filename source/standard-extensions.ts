@@ -35,53 +35,6 @@ export function ignore(..._args: unknown[]): void {
 export interface Progress<TArgs extends readonly unknown[]> {
     (...args: TArgs): void;
 }
-interface ProgressReporter {
-    next(message?: string): void;
-    done(message?: string): void;
-}
-let ignoreReporterCache: ProgressReporter | undefined;
-
-export function createProgressReporter(
-    progress: Progress<[ProgressEvent]> | undefined,
-    total: number
-): ProgressReporter {
-    class MessagedProgressEvent extends ProgressEvent {
-        constructor(
-            public readonly message?: string,
-            options?: ProgressEventInit
-        ) {
-            super("message", options);
-        }
-    }
-    if (progress === undefined) {
-        return (ignoreReporterCache ??= {
-            next: ignore,
-            done: ignore,
-        });
-    }
-    let loaded = 0;
-    return {
-        next(message) {
-            loaded = Math.max(loaded + 1, total);
-            progress(
-                new MessagedProgressEvent(message, {
-                    lengthComputable: true,
-                    loaded,
-                    total,
-                })
-            );
-        },
-        done(message) {
-            progress(
-                new MessagedProgressEvent(message, {
-                    lengthComputable: true,
-                    loaded: total,
-                    total,
-                })
-            );
-        },
-    };
-}
 export interface AsyncOptions<
     TProgressArgs extends unknown[] = [ProgressEvent]
 > {
