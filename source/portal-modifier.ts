@@ -11,19 +11,21 @@ export interface PortalModifier {
     // filterPortal(portal: PortalRecord): boolean;
     getPortals?(
         bounds: L.LatLngBounds,
-        result: FakePortalRecord[]
+        result: FakePortalRecord[],
+        signal?: AbortSignal
     ): Promise<void>;
 }
 
 export async function getCell14PortalsByModifier(
     modifiers: readonly PortalModifier[],
-    cell: Cell<14>
+    cell: Cell<14>,
+    signal?: AbortSignal
 ) {
     const cellId = cell.toString();
     const bounds = L.latLngBounds(cell.getCornerLatLngs());
     const portals: FakePortalRecord[] = [];
     for (const modifier of modifiers) {
-        await modifier.getPortals?.(bounds, portals);
+        await modifier.getPortals?.(bounds, portals, signal);
     }
     return portals.filter((p) => p.cell14Id === cellId);
 }
