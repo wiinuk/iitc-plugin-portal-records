@@ -6,7 +6,7 @@
 // @downloadURL  https://github.com/wiinuk/iitc-plugin-portal-records/raw/main/iitc-plugin-portal-records.user.js
 // @updateURL    https://github.com/wiinuk/iitc-plugin-portal-records/raw/main/iitc-plugin-portal-records.user.js
 // @homepageURL  https://github.com/wiinuk/iitc-plugin-portal-records
-// @version      0.8.1
+// @version      0.8.2
 // @description  IITC plug-in to record portals and cells.
 // @author       Wiinuk
 // @include      https://*.ingress.com/intel*
@@ -302,12 +302,12 @@ function sleepUntilNextAnimationFrame(options) {
 }
 
 ;// CONCATENATED MODULE: ./source/portal-modifier.ts
-async function getCell14PortalsByModifier(modifiers, cell) {
+async function getCell14PortalsByModifier(modifiers, cell, signal) {
     const cellId = cell.toString();
     const bounds = L.latLngBounds(cell.getCornerLatLngs());
     const portals = [];
     for (const modifier of modifiers) {
-        await modifier.getPortals?.(bounds, portals);
+        await modifier.getPortals?.(bounds, portals, signal);
     }
     return portals.filter((p) => p.cell14Id === cellId);
 }
@@ -679,7 +679,7 @@ async function getNearlyCell14s(records, modifiers, bounds, signal) {
         await records.enterTransactionScope({ signal }, function* (store) {
             yield* store.iteratePortalsInCell14(cellId, collectPortal);
         });
-        const portals = await getCell14PortalsByModifier(modifiers, cell);
+        const portals = await getCell14PortalsByModifier(modifiers, cell, signal);
         if (portals)
             for (const portal of portals)
                 collectPortal(portal);
