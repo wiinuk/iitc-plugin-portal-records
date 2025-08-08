@@ -6,7 +6,7 @@
 // @downloadURL  https://github.com/wiinuk/iitc-plugin-portal-records/raw/main/iitc-plugin-portal-records.user.js
 // @updateURL    https://github.com/wiinuk/iitc-plugin-portal-records/raw/main/iitc-plugin-portal-records.user.js
 // @homepageURL  https://github.com/wiinuk/iitc-plugin-portal-records
-// @version      0.8.0
+// @version      0.8.1
 // @description  IITC plug-in to record portals and cells.
 // @author       Wiinuk
 // @include      https://*.ingress.com/intel*
@@ -84,39 +84,6 @@ function id(x) {
 }
 function standard_extensions_ignore(..._args) {
     /* 引数を無視する関数 */
-}
-let ignoreReporterCache;
-function createProgressReporter(progress, total) {
-    class MessagedProgressEvent extends ProgressEvent {
-        constructor(message, options) {
-            super("message", options);
-            this.message = message;
-        }
-    }
-    if (progress === undefined) {
-        return (ignoreReporterCache ?? (ignoreReporterCache = {
-            next: standard_extensions_ignore,
-            done: standard_extensions_ignore,
-        }));
-    }
-    let loaded = 0;
-    return {
-        next(message) {
-            loaded = Math.max(loaded + 1, total);
-            progress(new MessagedProgressEvent(message, {
-                lengthComputable: true,
-                loaded,
-                total,
-            }));
-        },
-        done(message) {
-            progress(new MessagedProgressEvent(message, {
-                lengthComputable: true,
-                loaded: total,
-                total,
-            }));
-        },
-    };
 }
 class AbortError extends Error {
     constructor(message) {
@@ -1497,7 +1464,7 @@ function wrapper(plugin_info) {
     }
     // メタデータを追加する
     plugin_info.dateTimeVersion = "20221226000000";
-    plugin_info.pluginId = "pgo-route-helper";
+    plugin_info.pluginId = "portal-records";
     // setup 内で IITC はロード済みと仮定できる
     const setup = function setup() {
         const pluginModule = window["_iitc-plugin-portal-records-97383620-8c7a-4da6-99b5-36afca698435"];
