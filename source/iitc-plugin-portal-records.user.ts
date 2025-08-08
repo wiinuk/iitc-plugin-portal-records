@@ -58,7 +58,7 @@ function wrapper(plugin_info: PluginInfo) {
 
     // メタデータを追加する
     plugin_info.dateTimeVersion = "20221226000000";
-    plugin_info.pluginId = "pgo-route-helper";
+    plugin_info.pluginId = "portal-records";
 
     // setup 内で IITC はロード済みと仮定できる
     const setup: SetupHook = function setup() {
