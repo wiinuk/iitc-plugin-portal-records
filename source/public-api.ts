@@ -8,7 +8,9 @@ import type { CellRecord, PortalRecord, PortalRecords } from "./portal-records";
 import type { IterationFlow } from "./typed-idb";
 import { createCellFromCoordinates, getCellId } from "./typed-s2cell";
 
-export interface PublicApi {
+export interface PublicApi_Old {
+    readonly version?: undefined;
+
     getS2Cell14(
         lat: number,
         lng: number,
@@ -25,6 +27,10 @@ export interface PublicApi {
         action: (cell14: CellRecord<14>) => IterationFlow,
         options?: { readonly signal?: AbortSignal }
     ): Promise<void>;
+}
+
+export interface PublicApi_0_8_0 extends Omit<PublicApi_Old, "version"> {
+    readonly version: "0.8.0";
 
     registerModifier(modifier: PortalModifier): void;
     unregisterModifier(id: NonNullable<PortalModifier["id"]>): void;
@@ -34,12 +40,14 @@ export interface PublicApi {
         name: string
     ): FakePortalRecord;
 }
+export type PublicApi = PublicApi_Old | PublicApi_0_8_0;
 
 export function createPublicApi(
     records: PortalRecords,
     modifiers: PortalModifier[]
 ): PublicApi {
-    return {
+    return Object.freeze({
+        version: "0.8.0",
         async getS2Cell14(lat, lng, options) {
             const cell14 = createCellFromCoordinates(L.latLng(lat, lng), 14);
             const cellId = cell14.toString();
@@ -102,5 +110,5 @@ export function createPublicApi(
                 isFake: true,
             };
         },
-    };
+    } satisfies PublicApi);
 }
