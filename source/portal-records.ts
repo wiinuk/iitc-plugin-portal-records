@@ -58,61 +58,107 @@ const databaseSchema = {
 } as const satisfies Idb.DatabaseSchemaKind;
 type DatabaseSchema = typeof databaseSchema;
 
-export type PortalsStore = ReturnType<typeof createPortalStore>;
+export interface PortalsStore {
+    getPortalOfGuid(
+        guid: string
+    ): Idb.TransactionScope<PortalRecord | undefined>;
+    getPortalOfCoordinates(
+        lat: number,
+        lng: number
+    ): Idb.TransactionScope<PortalRecord | undefined>;
+    setPortal(value: PortalRecord): Idb.TransactionScope<PortalRecord>;
+    removePortal(guid: string): Idb.TransactionScope<void>;
+    iteratePortals(
+        action: (value: PortalRecord) => Idb.IterationFlow
+    ): Idb.TransactionScope<void>;
+    iteratePortalsInCell14(
+        cell14Id: Cell14Id,
+        action: (portal: PortalRecord) => Idb.IterationFlow
+    ): Idb.TransactionScope<void>;
+    iteratePortalsInCell17(
+        cell17Id: Cell17Id,
+        action: (portal: PortalRecord) => Idb.IterationFlow
+    ): Idb.TransactionScope<void>;
+    getCell14(
+        cell14Id: Cell14Id
+    ): Idb.TransactionScope<CellRecord<14> | undefined>;
+    setCell14(cell: CellRecord<14>): Idb.TransactionScope<CellRecord<14>>;
+    iterateCell14s(
+        action: (cell14: CellRecord<14>) => Idb.IterationFlow
+    ): Idb.TransactionScope<void>;
+}
 export interface PortalRecords {
     enterTransactionScope<R>(
         options: { signal?: AbortSignal } | null | undefined,
         scope: (portals: PortalsStore) => Idb.TransactionScope<R>
     ): Promise<R>;
 }
-function createPortalStore({
-    portals,
-    cell14s,
-}: Readonly<{
-    portals: Idb.Store<DatabaseSchema, "portals">;
-    cell14s: Idb.Store<DatabaseSchema, "cell14s">;
-}>) {
-    const coordinatesIndex = Idb.getIndex(portals, "coordinates");
-    const cell14IdIndex = Idb.getIndex(portals, "cell14Id");
-    const cell17IdIndex = Idb.getIndex(portals, "cell17Id");
-    return {
-        getPortalOfGuid(guid: string) {
-            return Idb.getValue(portals, guid);
-        },
-        getPortalOfCoordinates(lat: number, lng: number) {
-            return Idb.getValueOfIndex(coordinatesIndex, [lat, lng]);
-        },
-        setPortal(value: PortalRecord) {
-            return Idb.putValue(portals, value);
-        },
-        removePortal(guid: string) {
-            return Idb.deleteValue(portals, guid);
-        },
-        iteratePortals(action: (value: PortalRecord) => Idb.IterationFlow) {
-            return Idb.iterateValues(portals, null, action);
-        },
-        iteratePortalsInCell14(
-            cell14Id: Cell14Id,
-            action: (portal: PortalRecord) => Idb.IterationFlow
-        ) {
-            return Idb.iterateValuesOfIndex(cell14IdIndex, cell14Id, action);
-        },
-        iteratePortalsInCell17(
-            cell17Id: Cell17Id,
-            action: (portal: PortalRecord) => Idb.IterationFlow
-        ) {
-            return Idb.iterateValuesOfIndex(cell17IdIndex, cell17Id, action);
-        },
-        getCell14(cell14Id: Cell14Id) {
-            return Idb.getValue(cell14s, cell14Id);
-        },
-        setCell14(cell: CellRecord<14>) {
-            return Idb.putValue(cell14s, cell);
-        },
-        iterateCell14s(action: (cell14: CellRecord<14>) => Idb.IterationFlow) {
-            return Idb.iterateValues(cell14s, null, action);
-        },
-    };
+class IdbPortalsStore implements PortalsStore {
+    private _coordinatesIndex:
+        | Idb.Index<DatabaseSchema, "portals", "coordinates">
+        | undefined;
+    private _cell14IdIndex:
+        | Idb.Index<DatabaseSchema, "portals", "cell14Id">
+        | undefined;
+    private _cell17IdIndex:
+        | Idb.Index<DatabaseSchema, "portals", "cell17Id">
+        | undefined;
+
+    constructor(
+        private _portals: Idb.Store<DatabaseSchema, "portals">,
+        private _cell14s: Idb.Store<DatabaseSchema, "cell14s">
+    ) {}
+
+    getPortalOfGuid(guid: string) {
+        return Idb.getValue(this._portals, guid);
+    }
+    getPortalOfCoordinates(lat: number, lng: number) {
+        return Idb.getValueOfIndex(
+            (this._coordinatesIndex ??= Idb.getIndex(
+                this._portals,
+                "coordinates"
+            )),
+            [lat, lng]
+        );
+    }
+    setPortal(value: PortalRecord) {
+        return Idb.putValue(this._portals, value);
+    }
+    removePortal(guid: string) {
+        return Idb.deleteValue(this._portals, guid);
+    }
+    iteratePortals(action: (value: PortalRecord) => Idb.IterationFlow) {
+        return Idb.iterateValues(this._portals, null, action);
+    }
+    iteratePortalsInCell14(
+        cell14Id: Cell14Id,
+        action: (portal: PortalRecord) => Idb.IterationFlow
+    ) {
+        return Idb.iterateValuesOfIndex(
+            (this._cell14IdIndex ??= Idb.getIndex(this._portals, "cell14Id")),
+            cell14Id,
+            action
+        );
+    }
+    iteratePortalsInCell17(
+        cell17Id: Cell17Id,
+        action: (portal: PortalRecord) => Idb.IterationFlow
+    ) {
+        return Idb.iterateValuesOfIndex(
+            (this._cell17IdIndex ??= Idb.getIndex(this._portals, "cell17Id")),
+            cell17Id,
+            action
+        );
+    }
+    getCell14(cell14Id: Cell14Id) {
+        return Idb.getValue(this._cell14s, cell14Id);
+    }
+    setCell14(cell: CellRecord<14>) {
+        return Idb.putValue(this._cell14s, cell);
+    }
+    iterateCell14s(action: (cell14: CellRecord<14>) => Idb.IterationFlow) {
+        return Idb.iterateValues(this._cell14s, null, action);
+    }
 }
 
 const databaseName = "portal-records-da2ed70d-f28d-491e-bdbe-eb1726fc5e75";
@@ -128,7 +174,8 @@ export async function openRecords(): Promise<PortalRecords> {
             return Idb.enterTransactionScope(
                 database,
                 { mode: "readwrite", signal: options?.signal },
-                (stores) => scope(createPortalStore(stores)),
+                (stores) =>
+                    scope(new IdbPortalsStore(stores.portals, stores.cell14s)),
                 "portals",
                 "cell14s"
             );
