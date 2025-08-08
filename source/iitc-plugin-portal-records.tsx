@@ -14,7 +14,7 @@ import { PromiseSource } from "./promise-source";
 import { appendIitcSearchResult } from "./search";
 import { createS2Namespace } from "./s2cell";
 import flowerPatternSvgText from "../images/flower-pattern.svg";
-import { createEmptyModifier } from "./portal-modifier";
+import { type PortalModifier } from "./portal-modifier";
 
 function reportError(error: unknown) {
     console.error(error);
@@ -307,7 +307,7 @@ async function asyncMain() {
     addStyle(cssText);
     const records = await openRecords();
     const cellOptions = createOptions();
-    const modifierCell = { contents: createEmptyModifier() };
+    const modifiers: PortalModifier[] = [];
 
     async function updateLayersAsync(
         isRefreshEnd: boolean,
@@ -327,7 +327,7 @@ async function asyncMain() {
         }
         const nearlyCells = await getNearlyCell14s(
             records,
-            modifierCell.contents,
+            modifiers,
             map.getBounds(),
             signal
         );
@@ -374,5 +374,5 @@ async function asyncMain() {
         )
     );
 
-    publicApiSource.setResult(createPublicApi(records, modifierCell));
+    publicApiSource.setResult(createPublicApi(records, modifiers));
 }

@@ -15,21 +15,16 @@ export interface PortalModifier {
     ): Promise<void>;
 }
 
-const emptyModifierId = Symbol("empty");
-export function createEmptyModifier(): PortalModifier {
-    return {
-        id: emptyModifierId,
-    };
-}
-
 export async function getCell14PortalsByModifier(
-    modifier: PortalModifier,
+    modifiers: readonly PortalModifier[],
     cell: Cell<14>
 ) {
     const cellId = cell.toString();
     const bounds = L.latLngBounds(cell.getCornerLatLngs());
     const portals: FakePortalRecord[] = [];
-    await modifier.getPortals?.(bounds, portals);
+    for (const modifier of modifiers) {
+        await modifier.getPortals?.(bounds, portals);
+    }
     return portals.filter((p) => p.cell14Id === cellId);
 }
 

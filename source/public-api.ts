@@ -26,25 +26,18 @@ export interface PublicApi {
         options?: { readonly signal?: AbortSignal }
     ): Promise<void>;
 
-    readonly Modifier: ModifierNamespace;
-    readonly FakePortal: FakePortalNamespace;
-}
-export interface ModifierNamespace {
-    registerGlobal(modifier: PortalModifier): void;
-    updateGlobal(updater: (modifier: PortalModifier) => PortalModifier): void;
-
-    combine(
-        modifier1: PortalModifier,
-        modifier2: PortalModifier
-    ): PortalModifier;
-}
-export interface FakePortalNamespace {
-    createNew(lat: number, lng: number, name: string): FakePortalRecord;
+    registerModifier(modifier: PortalModifier): void;
+    unregisterModifier(id: NonNullable<PortalModifier["id"]>): void;
+    createNewFakePortal(
+        lat: number,
+        lng: number,
+        name: string
+    ): FakePortalRecord;
 }
 
 export function createPublicApi(
     records: PortalRecords,
-    modifierCell: { contents: PortalModifier }
+    modifiers: PortalModifier[]
 ): PublicApi {
     return {
         async getS2Cell14(lat, lng, options) {
@@ -60,7 +53,7 @@ export function createPublicApi(
                 });
             });
             const additionalPortals = await getCell14PortalsByModifier(
-                modifierCell.contents,
+                modifiers,
                 cell14
             );
             for (const portal of additionalPortals) {
@@ -82,49 +75,32 @@ export function createPublicApi(
                 portals.iterateCell14s(action)
             );
         },
-        Modifier: {
-            registerGlobal(modifier) {
-                modifierCell.contents = this.combine(
-                    modifierCell.contents,
-                    modifier
-                );
-            },
-            updateGlobal(updater) {
-                modifierCell.contents = updater(modifierCell.contents);
-            },
-            combine(m1, m2): PortalModifier {
-                const id = `combine(${m1.id?.toString() ?? "<unknown>"}, ${
-                    m2.id?.toString() ?? "<unknown>"
-                })`;
-                if (!m1.getPortals && !m2.getPortals) {
-                    return {
-                        id,
-                    };
-                }
-                return {
-                    id,
-                    async getPortals(bounds, result) {
-                        await m1.getPortals?.(bounds, result);
-                        await m2.getPortals?.(bounds, result);
-                    },
-                };
-            },
+        registerModifier(modifier) {
+            if (modifier.id != null) this.unregisterModifier(modifier.id);
+            modifiers.push(modifier);
         },
-        FakePortal: {
-            createNew(lat, lng, name): FakePortalRecord {
-                const latLng = L.latLng(lat, lng);
-                return {
-                    guid: generatePortalGuid(),
-                    lat,
-                    lng,
-                    name,
-                    cell14Id: getCellId(latLng, 14),
-                    cell17Id: getCellId(latLng, 17),
-                    data: {},
-                    lastFetchDate: Date.now(),
-                    isFake: true,
-                };
-            },
+        unregisterModifier(id) {
+            if (id == null) return;
+
+            modifiers.splice(
+                0,
+                modifiers.length,
+                ...modifiers.filter((m) => m.id !== id)
+            );
+        },
+        createNewFakePortal(lat, lng, name): FakePortalRecord {
+            const latLng = L.latLng(lat, lng);
+            return {
+                guid: generatePortalGuid(),
+                lat,
+                lng,
+                name,
+                cell14Id: getCellId(latLng, 14),
+                cell17Id: getCellId(latLng, 17),
+                data: {},
+                lastFetchDate: Date.now(),
+                isFake: true,
+            };
         },
     };
 }

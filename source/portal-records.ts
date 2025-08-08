@@ -307,7 +307,7 @@ function updateCellStatistics<TLevel extends number>(
 }
 export async function getNearlyCell14s(
     records: PortalRecords,
-    modifier: PortalModifier,
+    modifiers: readonly PortalModifier[],
     bounds: L.LatLngBounds,
     signal: AbortSignal
 ) {
@@ -330,7 +330,7 @@ export async function getNearlyCell14s(
         await records.enterTransactionScope({ signal }, function* (store) {
             yield* store.iteratePortalsInCell14(cellId, collectPortal);
         });
-        const portals = await getCell14PortalsByModifier(modifier, cell);
+        const portals = await getCell14PortalsByModifier(modifiers, cell);
         if (portals) for (const portal of portals) collectPortal(portal);
         if (cell14) result.push(cell14);
     }
